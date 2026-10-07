@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>JazzLicks</title>
+  <meta name="description" content="Write short jazz phrases on a staff with chord symbols, and hear them on piano or guitar.">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%231f1b16'/%3E%3Cellipse cx='12' cy='22' rx='5' ry='3.6' transform='rotate(-22 12 22)' fill='%23f6f1e7'/%3E%3Cpath d='M16.5 21V6l7 3' stroke='%23f6f1e7' stroke-width='2.2' fill='none'/%3E%3C/svg%3E">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Kalam:wght@700&family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo" aria-hidden="true">
+        <svg viewBox="0 0 32 32"><ellipse cx="12" cy="22" rx="5" ry="3.6" transform="rotate(-22 12 22)"/><path d="M16.5 21V6l7 3" fill="none" stroke-width="2.2"/></svg>
+      </span>
+      <h1>JazzLicks</h1>
+    </div>
+    <div class="actions">
+      <button id="import" class="btn ghost" title="Import licks from a file">Import</button>
+      <button id="export" class="btn ghost" title="Save all licks to a file">Export</button>
+      <button id="new-lick" class="btn primary">+ New<span class="long"> lick</span></button>
+      <input id="import-file" type="file" accept="application/json,.json" hidden>
+    </div>
+  </header>
+
+  <main id="licks" class="licks"></main>
+
+  <footer class="foot">
+    Your licks are saved in this browser. Use Export to back them up or move them to another device.
+  </footer>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+  <script src="lib/vexflow-petaluma.js"></script>
+  <script src="lib/Tone.js"></script>
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
