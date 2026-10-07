@@ -8,7 +8,9 @@ Write short jazz phrases (1–6 bars) on a treble staff, add chord symbols, and 
 
 - Treble-clef notation in a hand-written jazz style (VexFlow + Petaluma font)
 - Chord symbols above the staff: all 12 roots × maj7, m7, m7♭5 (ø), 7. Up to two per bar (beats 1 and 3)
-- Play / pause per lick, with piano or guitar sounds, swing feel, tempo and loop
+- Play / pause per lick, with piano or classical guitar, tempo, count-in and loop
+- Rhythm section generated from the chords: **Swing** (walking bass, ride cymbal, hi-hat on 2 & 4) or **Latin** (bossa nova bass, shaker, cross-stick, kick). Bass and drums can each be switched off
+- Chords can be **Held** (sustained), **Comping** (rhythmic, in the style) or **Off**
 - Key signatures (changing the key transposes all notes and chords), accidentals, dotted notes, triplets, rests, ties
 - A text box under each lick for your notes
 - Licks are saved in the browser, and **Sync** keeps them the same on all your devices (via a private GitHub gist). Export / Import makes backup files

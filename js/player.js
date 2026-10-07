@@ -1,5 +1,7 @@
-// Playback with Tone.js: sampled piano or guitar, swing feel, chords + melody.
+// Playback with Tone.js: sampled piano or guitar for melody and chords, plus an
+// optional rhythm section (upright bass + drums) in swing or latin style.
 import { MEASURE_TICKS, BEAT_TICKS, noteTicks, midi, chordVoicing } from './music.js';
+import { buildBacking, chordList, countInEvents } from './backing.js';
 
 function sampleUrls(names) {
   const urls = {};
@@ -30,7 +32,70 @@ const INSTRUMENTS = {
   },
 };
 
+const BASS = {
+  baseUrl: 'https://gleitz.github.io/midi-js-soundfonts/FluidR3_GM/acoustic_bass-mp3/',
+  urls: { E1: 'E1.mp3', G1: 'G1.mp3', 'A#1': 'Bb1.mp3', 'C#2': 'Db2.mp3', E2: 'E2.mp3', G2: 'G2.mp3', 'A#2': 'Bb2.mp3', 'C#3': 'Db3.mp3', E3: 'E3.mp3' },
+};
+
 const loaded = {};
+let bassPromise = null;
+let kitPromise = null;
+
+function loadBass() {
+  if (!bassPromise) {
+    bassPromise = new Promise((resolve, reject) => {
+      const sampler = new Tone.Sampler({
+        urls: BASS.urls,
+        baseUrl: BASS.baseUrl,
+        release: 0.25,
+        volume: 3,
+        onload: () => resolve(sampler),
+        onerror: (e) => { bassPromise = null; reject(e); },
+      }).toDestination();
+    });
+  }
+  return bassPromise;
+}
+
+// Drum kit: sampled kick / snare / hi-hat / shaker, synthesized ride cymbal
+// and cross-stick (no free sampled ones are available).
+function loadKit() {
+  if (!kitPromise) {
+    kitPromise = new Promise((resolve, reject) => {
+      const out = new Tone.Volume(-3).toDestination();
+      const ride = new Tone.MetalSynth({
+        envelope: { attack: 0.001, decay: 1.1, release: 0.3 },
+        harmonicity: 5.1,
+        modulationIndex: 24,
+        resonance: 5000,
+        octaves: 1.2,
+        volume: -26,
+      });
+      ride.chain(new Tone.Filter(2500, 'highpass'), out);
+      const stick = new Tone.MembraneSynth({
+        pitchDecay: 0.006,
+        octaves: 2,
+        envelope: { attack: 0.001, decay: 0.07, sustain: 0, release: 0.04 },
+        volume: -12,
+      }).connect(out);
+      const samples = new Tone.Sampler({
+        urls: { C1: 'acoustic-kit/kick.mp3', D1: 'acoustic-kit/snare.mp3', 'F#1': 'acoustic-kit/hihat.mp3', A1: '../berklee/shaker_1.mp3' },
+        baseUrl: 'https://tonejs.github.io/audio/drum-samples/',
+        release: 0.4,
+        onload: () => resolve({
+          play(sound, time, vel) {
+            if (sound === 'ride') ride.triggerAttackRelease(320, 0.9, time, vel);
+            else if (sound === 'stick') stick.triggerAttackRelease('A5', 0.05, time, vel);
+            else samples.triggerAttackRelease({ kick: 'C1', snare: 'D1', hihat: 'F#1', shaker: 'A1' }[sound], 0.6, time, vel);
+          },
+          stop() { samples.releaseAll(); },
+        }),
+        onerror: (e) => { kitPromise = null; reject(e); },
+      }).connect(out);
+    });
+  }
+  return kitPromise;
+}
 
 // ---------------------------------------------------------------- iPhone audio
 // iOS mutes Web Audio when the ring/silent switch is on silent. Declaring the
@@ -117,9 +182,14 @@ function noteName(m) {
 }
 
 export function buildEvents(phrase) {
-  const swing = phrase.swing !== false;
+  const latin = phrase.style === 'latin';
   const tempo = phrase.tempo || 160;
-  const sec = (t) => tickToSeconds(t, tempo, swing);
+  const bass = phrase.bass !== false;
+  const drums = phrase.drums !== false;
+  // An optional one-bar count-in shifts everything by a bar.
+  const offset = phrase.countIn ? MEASURE_TICKS : 0;
+  const sec = (t) => tickToSeconds(t + offset, tempo, !latin);
+  const span = (t, d) => Math.max(0.05, sec(t + d) - sec(t));
   const events = [];
 
   // Melody (ties merge into one long note)
@@ -158,23 +228,30 @@ export function buildEvents(phrase) {
     });
   }
 
-  // Chords: each lasts until the next chord or the end of the phrase.
-  const chordList = [];
-  phrase.measures.forEach((measure, m) => {
-    (measure.chords || []).forEach((c, slot) => {
-      if (c) chordList.push({ chord: c, tick: m * MEASURE_TICKS + (slot * MEASURE_TICKS) / 2 });
-    });
-  });
   const total = phrase.measures.length * MEASURE_TICKS;
-  chordList.forEach((c, k) => {
-    const end = k + 1 < chordList.length ? chordList[k + 1].tick : total;
-    events.push({
-      kind: 'chord', time: sec(c.tick), dur: sec(end) - sec(c.tick),
-      notes: chordVoicing(c.chord).map(noteName),
+  // Chords: 'held' (sustained, the original sound), 'comp' (rhythmic) or 'off'.
+  const chords = phrase.chords || 'comp';
+  if (bass || drums || chords === 'comp') {
+    // Rhythm section: comping chords, bass line, drums.
+    for (const ev of buildBacking(phrase, { bass, drums, comp: chords === 'comp' })) {
+      if (ev.kind === 'drum') events.push({ kind: 'drum', time: sec(ev.tick), sound: ev.sound, vel: ev.vel });
+      else if (ev.kind === 'bass') events.push({ kind: 'bass', time: sec(ev.tick), dur: span(ev.tick, ev.dur), notes: [noteName(ev.midi)], vel: ev.vel });
+      else events.push({ kind: 'chord', time: sec(ev.tick), dur: span(ev.tick, ev.dur), notes: ev.notes.map(noteName), vel: ev.vel });
+    }
+  }
+  if (chords === 'held') {
+    // Held chords: each lasts until the next chord or the end of the phrase.
+    const list = chordList(phrase);
+    list.forEach((c, k) => {
+      const end = k + 1 < list.length ? list[k + 1].tick : total;
+      events.push({ kind: 'chord', time: sec(c.tick), dur: sec(end) - sec(c.tick), notes: chordVoicing(c.chord).map(noteName), vel: 1 });
     });
-  });
+  }
+  if (phrase.countIn) {
+    for (const ev of countInEvents(phrase)) events.push({ kind: 'drum', time: tickToSeconds(ev.tick, tempo, false), sound: ev.sound, vel: ev.vel });
+  }
 
-  return { events, total: sec(total) };
+  return { events, total: sec(total), start: sec(0), needsBass: bass, needsKit: drums || !!phrase.countIn };
 }
 
 class Player {
@@ -199,9 +276,16 @@ class Player {
     this.hooks = hooks;
     this.state = 'loading';
     hooks.onState('loading');
+    const built = buildEvents(phrase);
     let sampler;
+    let bass = null;
+    let kit = null;
     try {
-      sampler = await loadInstrument(phrase.instrument);
+      [sampler, bass, kit] = await Promise.all([
+        loadInstrument(phrase.instrument),
+        built.needsBass ? loadBass().catch(() => null) : null,
+        built.needsKit ? loadKit().catch(() => null) : null,
+      ]);
     } catch (e) {
       this.state = 'stopped';
       this.currentId = null;
@@ -211,8 +295,10 @@ class Player {
     }
     if (this.currentId !== phrase.id || this.state !== 'loading') return; // cancelled meanwhile
     this.sampler = sampler;
+    this.bass = bass;
+    this.kit = kit;
     const def = INSTRUMENTS[phrase.instrument] || INSTRUMENTS.piano;
-    const { events, total } = buildEvents(phrase);
+    const { events, total, start } = built;
     const T = Tone.getTransport();
     T.cancel(0);
     T.position = 0;
@@ -221,14 +307,18 @@ class Player {
         if (ev.kind === 'melody') {
           sampler.triggerAttackRelease(ev.notes, ev.dur, time, def.melodyVel);
         } else if (ev.kind === 'chord') {
-          ev.notes.forEach((nn, k) => sampler.triggerAttackRelease(nn, ev.dur, time + k * def.strum, def.chordVel));
+          ev.notes.forEach((nn, k) => sampler.triggerAttackRelease(nn, ev.dur, time + k * def.strum, def.chordVel * ev.vel));
+        } else if (ev.kind === 'bass') {
+          if (bass) bass.triggerAttackRelease(ev.notes, ev.dur, time, ev.vel);
+        } else if (ev.kind === 'drum') {
+          if (kit) kit.play(ev.sound, time, ev.vel);
         }
         if (ev.m !== undefined) Tone.getDraw().schedule(() => this.hooks && this.hooks.onNote(ev.m, ev.i), time);
       }, ev.time);
     }
     if (phrase.loop) {
       T.loop = true;
-      T.loopStart = 0;
+      T.loopStart = start; // the count-in plays only once
       T.loopEnd = total;
     } else {
       T.loop = false;
@@ -239,9 +329,15 @@ class Player {
     T.start('+0.05');
   }
 
+  releaseAll() {
+    if (this.sampler) this.sampler.releaseAll();
+    if (this.bass) this.bass.releaseAll();
+    if (this.kit) this.kit.stop();
+  }
+
   pause() {
     Tone.getTransport().pause();
-    if (this.sampler) this.sampler.releaseAll();
+    this.releaseAll();
     releaseAudioSession();
     this.state = 'paused';
     this.hooks && this.hooks.onState('paused');
@@ -259,7 +355,7 @@ class Player {
     T.stop();
     T.cancel(0);
     T.loop = false;
-    if (this.sampler) this.sampler.releaseAll();
+    this.releaseAll();
     releaseAudioSession();
     const hooks = this.hooks;
     this.state = 'stopped';

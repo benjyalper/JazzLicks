@@ -5,6 +5,7 @@ import {
 } from './music.js';
 import { renderPhrase, hitTest, ghostAt, noteElement } from './render.js';
 import { player, previewNote, warmUp } from './player.js';
+import { STYLES } from './backing.js';
 import { initSync, notifyChange, connect, disconnect, syncNow, syncInfo } from './sync.js';
 
 const STORAGE_KEY = 'jazzlicks.v1';
@@ -31,7 +32,8 @@ const R = (dur = '8') => ({ rest: true, dur, dots: 0, tie: false });
 function newPhrase() {
   return {
     id: uid(), title: 'New lick', keySig: 'C', tempo: 160, instrument: 'piano',
-    swing: true, loop: false, measures: [emptyMeasure(), emptyMeasure()], text: '',
+    style: 'swing', chords: 'comp', bass: true, drums: true, countIn: false, loop: false,
+    measures: [emptyMeasure(), emptyMeasure()], text: '',
   };
 }
 
@@ -41,7 +43,7 @@ function exampleLick() {
     id: 'example-hawkins', // fixed id so every device shares the same example
     updatedAt: 0,
     title: 'Hawkins – Desafinado (minor ii–V)',
-    keySig: 'F', tempo: 150, instrument: 'piano', swing: true, loop: false,
+    keySig: 'F', tempo: 150, instrument: 'piano', style: 'latin', bass: true, drums: true, countIn: false, loop: false,
     measures: [
       {
         chords: [{ root: 'E', quality: 'm7b5' }, null],
@@ -282,25 +284,34 @@ function buildCard(p) {
     },
   });
 
-  const sound = h('div', { class: 'seg', role: 'group', 'aria-label': 'Instrument' },
-    ['piano', 'guitar'].map((inst) => h('button', {
-      class: p.instrument === inst ? 'on' : '',
-      'aria-pressed': p.instrument === inst ? 'true' : 'false',
+  // Segmented control (one of several options).
+  const seg = (label, options, get, set) => h('div', { class: 'seg', role: 'group', 'aria-label': label },
+    options.map(([value, text]) => h('button', {
+      class: get() === value ? 'on' : '',
+      'aria-pressed': get() === value ? 'true' : 'false',
       onclick: (e) => {
-        p.instrument = inst; save();
+        set(value); save();
         e.currentTarget.parentElement.querySelectorAll('button').forEach((b) => {
           const on = b === e.currentTarget;
           b.classList.toggle('on', on);
           b.setAttribute('aria-pressed', on ? 'true' : 'false');
         });
-        warmUp(inst);
         restartIfPlaying(p.id);
       },
-    }, inst === 'piano' ? 'Piano' : 'Guitar')));
+    }, text)));
 
-  const check = (label, prop) => h('label', { class: 'check' },
+  const sound = seg('Instrument', [['piano', 'Piano'], ['guitar', 'Guitar']],
+    () => p.instrument, (v) => { p.instrument = v; warmUp(v); });
+  const style = seg('Style', STYLES.map((st) => [st.id, st.label]),
+    () => p.style || 'swing', (v) => { p.style = v; });
+
+  const chordsSeg = seg('Chords', [['held', 'Held'], ['comp', 'Comping'], ['off', 'Off']],
+    () => p.chords || 'comp', (v) => { p.chords = v; });
+
+  // Checkbox; `def` is the value when the lick doesn't have the setting yet.
+  const check = (label, prop, def = false) => h('label', { class: 'check' },
     h('input', {
-      type: 'checkbox', checked: !!p[prop],
+      type: 'checkbox', checked: p[prop] === undefined ? def : !!p[prop],
       onchange: (e) => { p[prop] = e.target.checked; save(); restartIfPlaying(p.id); },
     }), label);
 
@@ -308,8 +319,15 @@ function buildCard(p) {
     h('label', { class: 'field' }, h('span', {}, 'Key'), keySel),
     h('label', { class: 'field' }, h('span', {}, 'Tempo'), tempo, h('span', { class: 'unit' }, 'bpm')),
     sound,
-    check('Swing', 'swing'),
-    check('Loop', 'loop'));
+    style,
+    h('div', { class: 'field' }, h('span', {}, 'Chords'), chordsSeg),
+    h('div', { class: 'checks' },
+      h('span', { class: 'checks-label' }, 'Band'),
+      check('Bass', 'bass', true),
+      check('Drums', 'drums', true)),
+    h('div', { class: 'checks' },
+      check('Count-in', 'countIn'),
+      check('Loop', 'loop')));
 
   const host = h('div', { class: 'stave-host' + (isEditing ? ' editing' : '') });
   const notes = h('textarea', {
@@ -495,7 +513,10 @@ function audition(p, note) {
 
 // Re-draw after a change. `dirty` = the phrase data changed (needs saving).
 function changed(p, dirty = true) {
-  if (dirty) save();
+  if (dirty) {
+    save();
+    if (player.currentId === p.id && player.state === 'paused') player.stop();
+  }
   drawStave(p.id);
   refreshToolbar();
 }
@@ -948,7 +969,9 @@ function togglePlay(id) {
 
 function restartIfPlaying(id) {
   const p = byId(id);
-  if (p && player.currentId === id && player.state === 'playing') player.play(p, hooksFor(id));
+  if (!p || player.currentId !== id) return;
+  if (player.state === 'playing') player.play(p, hooksFor(id));
+  else player.stop(); // paused: the next play starts fresh with the new settings
 }
 
 // ---------------------------------------------------------------- keyboard
