@@ -48,7 +48,9 @@ button:disabled { cursor: default; opacity: 0.35; }
 .logo { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 9px; background: var(--ink); }
 .logo svg { width: 22px; height: 22px; fill: var(--paper); stroke: var(--paper); }
 
-.actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.actions { display: flex; align-items: center; gap: 8px; justify-content: flex-end; }
+.brand { min-width: 0; }
+.header-menu .menu-items { min-width: 190px; }
 
 .btn {
   border: 1px solid var(--line);

@@ -110,12 +110,25 @@ const PADDED = { fillStyle: '#c4c0b8', strokeStyle: '#c4c0b8' };
 export function renderPhrase(host, phrase, opts = {}) {
   host.innerHTML = '';
   const pixelWidth = Math.max(240, Math.floor(opts.width || host.clientWidth || 600));
-  // Small screens get bigger notation so notes are easier to tap.
-  const scale = pixelWidth < 700 ? 1.2 : 1;
+  // Phones get slightly smaller notation so two bars fit on a line.
+  const scale = pixelWidth < 500 ? 0.8 : 1;
   const width = pixelWidth / scale;
   const n = phrase.measures.length;
-  const perLine = Math.max(1, Math.min(n, 4, Math.floor(width / 230)));
+  const perLine = Math.max(1, Math.min(n, 4, Math.floor(width / 185)));
   const lineCount = Math.ceil(n / perLine);
+
+  // Lines with very high notes get extra room so they don't hit the chord row.
+  const lineExtra = [];
+  for (let L = 0; L < lineCount; L++) {
+    let maxD = -Infinity;
+    for (const ms of phrase.measures.slice(L * perLine, (L + 1) * perLine)) {
+      for (const nt of ms.notes) if (!nt.rest) maxD = Math.max(maxD, diatonicIndex(nt.step, nt.oct));
+    }
+    const headTop = (F5 - maxD) * 5 - 5; // relative to the top staff line
+    const limit = CHORD_BASELINE - TOP_LINE_OFFSET + 12;
+    const extra = maxD === -Infinity ? 0 : Math.max(0, Math.ceil(limit - headTop));
+    lineExtra.push(extra);
+  }
 
   const renderer = new VF.Renderer(host, VF.Renderer.Backends.SVG);
   renderer.resize(pixelWidth, lineCount * LINE_H * scale);
@@ -123,11 +136,16 @@ export function renderPhrase(host, phrase, opts = {}) {
   ctx.scale(scale, scale);
   const svg = host.querySelector('svg');
 
-  const layout = { svg, width, scale, perLine, measures: [], notes: [], chords: [] };
+  const layout = { svg, width, scale, offsetY: 0, perLine, measures: [], notes: [], chords: [] };
   const real = []; // real (non-pad) notes in order, for ties
+  let cursor = 0;
 
   for (let L = 0; L < lineCount; L++) {
-    const lineTop = L * LINE_H;
+    const bandTop = cursor; // top of this system (chord row)
+    const lineTop = bandTop + lineExtra[L]; // stave y
+    const bandBottom = lineTop + LINE_H;
+    const group = ctx.openGroup('system');
+    const lineMeasures = [];
     const first = L * perLine;
     const count = Math.min(perLine, n - first);
 
@@ -191,19 +209,50 @@ export function renderPhrase(host, phrase, opts = {}) {
       }
 
       layout.measures.push({
-        m, line: L, stave, lineTop,
+        m, line: L, stave, lineTop, bandTop, bandBottom,
         x0: stave.getX(), x1: stave.getX() + stave.getWidth(),
         noteStart: stave.getNoteStartX(), noteEnd: stave.getNoteEndX(),
         topLine: stave.getYForLine(0),
         items,
       });
+      lineMeasures.push(layout.measures[layout.measures.length - 1]);
       x += w;
     }
+    ctx.closeGroup();
+    // Start the next system below whatever this one actually drew (long stems, beams…).
+    let bottom = bandBottom;
+    try {
+      const bb = group.getBBox();
+      bottom = Math.max(bandBottom, Math.ceil(bb.y + bb.height) + 4);
+    } catch (e) { /* ignore */ }
+    for (const ml of lineMeasures) ml.bandBottom = bottom;
+    cursor = bottom;
   }
+  const totalH = cursor;
 
   drawTies(ctx, real);
   drawChords(svg, phrase, layout, opts);
+  fitToContent(svg, layout, totalH, pixelWidth, scale);
   return layout;
+}
+
+// Grow the drawing if anything (very high/low notes, triplet numbers) sticks
+// out of the planned area, so nothing gets cut off.
+function fitToContent(svg, layout, height, pixelWidth, scale) {
+  let top = 0;
+  let bottom = height;
+  try {
+    const bb = svg.getBBox();
+    top = Math.min(0, Math.floor(bb.y) - 4);
+    bottom = Math.max(height, Math.ceil(bb.y + bb.height) + 4);
+  } catch (e) { /* not rendered yet */ }
+  const h = bottom - top;
+  svg.setAttribute('viewBox', `0 ${top} ${layout.width} ${h}`);
+  svg.setAttribute('height', h * scale);
+  svg.style.height = `${h * scale}px`;
+  svg.setAttribute('width', pixelWidth);
+  svg.style.width = `${pixelWidth}px`;
+  layout.offsetY = top;
 }
 
 function drawTies(ctx, real) {
@@ -249,7 +298,7 @@ function drawChords(svg, phrase, layout, opts) {
     for (let slot = 0; slot < 2; slot++) {
       const chord = chords[slot];
       const x = slot === 0 ? Math.min(tickX(ml, 0), ml.noteStart + 4) - 2 : tickX(ml, HALF_BAR) - 2;
-      const y = ml.lineTop + CHORD_BASELINE;
+      const y = ml.bandTop + CHORD_BASELINE;
       if (chord) {
         const parts = chordParts(chord);
         const t = document.createElementNS(SVG_NS, 'text');
@@ -279,7 +328,7 @@ function drawChords(svg, phrase, layout, opts) {
 }
 
 function measureAt(layout, x, y) {
-  return layout.measures.find((ml) => x >= ml.x0 && x <= ml.x1 && y >= ml.lineTop && y < ml.lineTop + LINE_H);
+  return layout.measures.find((ml) => x >= ml.x0 && x <= ml.x1 && y >= ml.bandTop && y < ml.bandBottom);
 }
 
 function diatonicAt(ml, y) {
@@ -298,7 +347,7 @@ export function hitTest(layout, x, y) {
   }
   const ml = measureAt(layout, x, y);
   if (!ml) return null;
-  if (y < ml.lineTop + CHORD_ZONE) {
+  if (y < ml.bandTop + CHORD_ZONE) {
     const mid = tickX(ml, HALF_BAR) - 6;
     return { type: 'chord', m: ml.m, slot: x < mid ? 0 : 1 };
   }
@@ -319,7 +368,7 @@ export function hitTest(layout, x, y) {
 /** Where to draw the hover "ghost" note head. */
 export function ghostAt(layout, x, y) {
   const ml = measureAt(layout, x, y);
-  if (!ml || y < ml.lineTop + CHORD_ZONE) return null;
+  if (!ml || y < ml.bandTop + CHORD_ZONE) return null;
   const d = diatonicAt(ml, y);
   const gy = yForDiatonic(ml, d);
   const ledgers = [];

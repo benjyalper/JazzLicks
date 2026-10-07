@@ -435,7 +435,7 @@ function drawAllStaves() {
 
 function svgPoint(layout, e) {
   const r = layout.svg.getBoundingClientRect();
-  return { x: (e.clientX - r.left) / layout.scale, y: (e.clientY - r.top) / layout.scale };
+  return { x: (e.clientX - r.left) / layout.scale, y: (e.clientY - r.top) / layout.scale + layout.offsetY };
 }
 
 function attachStaveEvents(p, host) {
@@ -1153,9 +1153,14 @@ document.addEventListener('keydown', (e) => {
 function boot() {
   load();
   $('#new-lick').addEventListener('click', addPhrase);
-  $('#export').addEventListener('click', exportLicks);
+  const headerMenu = $('#header-menu');
+  const closeHeaderMenu = () => headerMenu.removeAttribute('open');
+  $('#export').addEventListener('click', () => { closeHeaderMenu(); exportLicks(); });
   const fileInput = $('#import-file');
-  $('#import').addEventListener('click', () => fileInput.click());
+  $('#import').addEventListener('click', () => { closeHeaderMenu(); fileInput.click(); });
+  document.addEventListener('pointerdown', (e) => {
+    document.querySelectorAll('details.menu[open]').forEach((d) => { if (!d.contains(e.target)) d.removeAttribute('open'); });
+  });
   fileInput.addEventListener('change', () => {
     if (fileInput.files[0]) importLicks(fileInput.files[0]);
     fileInput.value = '';

@@ -24,9 +24,14 @@
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 18h10a4 4 0 0 0 .6-7.96A6 6 0 0 0 6.1 9.2 4.5 4.5 0 0 0 7 18z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
         <span class="sync-label">Sync</span><span class="sync-dot" aria-hidden="true"></span>
       </button>
-      <button id="import" class="btn ghost" title="Import licks from a file">Import</button>
-      <button id="export" class="btn ghost" title="Save all licks to a file">Export</button>
       <button id="new-lick" class="btn primary">+ New<span class="long"> lick</span></button>
+      <details id="header-menu" class="menu header-menu">
+        <summary aria-label="More" title="More">⋯</summary>
+        <div class="menu-items">
+          <button id="export">Export to a file</button>
+          <button id="import">Import from a file…</button>
+        </div>
+      </details>
       <input id="import-file" type="file" accept="application/json,.json" hidden>
     </div>
   </header>

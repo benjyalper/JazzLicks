@@ -32,6 +32,58 @@ const INSTRUMENTS = {
 
 const loaded = {};
 
+// ---------------------------------------------------------------- iPhone audio
+// iOS mutes Web Audio when the ring/silent switch is on silent. Declaring the
+// page as a media player (audioSession) and playing a silent <audio> element
+// moves it to the "playback" category, so sound comes out like a music app.
+
+let silentEl = null;
+
+function silentWavUrl() {
+  const rate = 8000;
+  const samples = rate / 2; // half a second
+  const buf = new Uint8Array(44 + samples);
+  const dv = new DataView(buf.buffer);
+  const str = (o, t) => [...t].forEach((c, i) => dv.setUint8(o + i, c.charCodeAt(0)));
+  str(0, 'RIFF'); dv.setUint32(4, 36 + samples, true); str(8, 'WAVE');
+  str(12, 'fmt '); dv.setUint32(16, 16, true); dv.setUint16(20, 1, true); dv.setUint16(22, 1, true);
+  dv.setUint32(24, rate, true); dv.setUint32(28, rate, true); dv.setUint16(32, 1, true); dv.setUint16(34, 8, true);
+  str(36, 'data'); dv.setUint32(40, samples, true);
+  buf.fill(128, 44); // 8-bit silence
+  let bin = '';
+  buf.forEach((b) => { bin += String.fromCharCode(b); });
+  return `data:audio/wav;base64,${btoa(bin)}`;
+}
+
+// Must be called directly inside a tap/click handler.
+export function unlockAudio() {
+  try {
+    if (navigator.audioSession) navigator.audioSession.type = 'playback';
+  } catch (e) { /* not supported */ }
+  try {
+    if (!silentEl) {
+      silentEl = document.createElement('audio');
+      silentEl.setAttribute('playsinline', '');
+      silentEl.setAttribute('x-webkit-airplay', 'deny');
+      silentEl.loop = true;
+      silentEl.preload = 'auto';
+      silentEl.src = silentWavUrl();
+    }
+    const p = silentEl.play();
+    if (p && p.catch) p.catch(() => {});
+  } catch (e) { /* ignore */ }
+  try {
+    const ctx = Tone.getContext().rawContext;
+    if (ctx.state !== 'running') ctx.resume();
+  } catch (e) { /* ignore */ }
+  return Tone.start();
+}
+
+function releaseAudioSession() {
+  if (silentEl) silentEl.pause();
+}
+
+
 function loadInstrument(name) {
   if (!loaded[name]) {
     const def = INSTRUMENTS[name] || INSTRUMENTS.piano;
@@ -134,6 +186,7 @@ class Player {
   }
 
   async toggle(phrase, hooks) {
+    unlockAudio();
     if (this.currentId === phrase.id && this.state === 'playing') return this.pause();
     if (this.currentId === phrase.id && this.state === 'paused') return this.resume();
     return this.play(phrase, hooks);
@@ -141,7 +194,7 @@ class Player {
 
   async play(phrase, hooks) {
     this.stop();
-    await Tone.start();
+    await unlockAudio();
     this.currentId = phrase.id;
     this.hooks = hooks;
     this.state = 'loading';
@@ -189,11 +242,13 @@ class Player {
   pause() {
     Tone.getTransport().pause();
     if (this.sampler) this.sampler.releaseAll();
+    releaseAudioSession();
     this.state = 'paused';
     this.hooks && this.hooks.onState('paused');
   }
 
   resume() {
+    unlockAudio();
     Tone.getTransport().start('+0.02');
     this.state = 'playing';
     this.hooks && this.hooks.onState('playing');
@@ -205,6 +260,7 @@ class Player {
     T.cancel(0);
     T.loop = false;
     if (this.sampler) this.sampler.releaseAll();
+    releaseAudioSession();
     const hooks = this.hooks;
     this.state = 'stopped';
     this.currentId = null;
@@ -219,11 +275,14 @@ class Player {
 export const player = new Player();
 
 // Short audition of a single pitch while editing (ignored if sounds aren't ready yet).
+let previewTimer = null;
 export async function previewNote(midiNumber, instrument) {
   try {
-    await Tone.start();
+    await unlockAudio();
     const sampler = await loadInstrument(instrument);
     sampler.triggerAttackRelease(noteName(midiNumber), 0.35, undefined, 0.7);
+    clearTimeout(previewTimer);
+    previewTimer = setTimeout(() => { if (player.state !== 'playing') releaseAudioSession(); }, 1500);
   } catch (e) {
     /* preview is best-effort */
   }
