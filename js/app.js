@@ -5,6 +5,7 @@ import {
 } from './music.js';
 import { renderPhrase, hitTest, ghostAt, noteElement } from './render.js';
 import { player, previewNote, warmUp } from './player.js';
+import { initSync, notifyChange, connect, disconnect, syncNow, syncInfo } from './sync.js';
 
 const STORAGE_KEY = 'jazzlicks.v1';
 const MAX_MEASURES = 6;
@@ -17,6 +18,8 @@ const state = {
   sel: null, // { m, i } in the phrase being edited
   tool: { dur: '8', dots: 0, trip: false },
   undo: [], // [{ id, json }]
+  deleted: {}, // id -> time deleted (so deletions sync to other devices)
+  orderUpdatedAt: 0,
 };
 const cards = new Map(); // id -> { el, host, layout, playBtn, ... }
 
@@ -35,7 +38,8 @@ function newPhrase() {
 // Transcribed from the Coleman Hawkins "Desafinado" example.
 function exampleLick() {
   return {
-    id: uid(),
+    id: 'example-hawkins', // fixed id so every device shares the same example
+    updatedAt: 0,
     title: 'Hawkins – Desafinado (minor ii–V)',
     keySig: 'F', tempo: 150, instrument: 'piano', swing: true, loop: false,
     measures: [
@@ -59,23 +63,89 @@ function load() {
       const data = JSON.parse(raw);
       if (Array.isArray(data.phrases)) {
         state.phrases = data.phrases;
+        state.deleted = data.deleted || {};
+        state.orderUpdatedAt = data.orderUpdatedAt || 0;
+        rememberSaved();
         return;
       }
     }
   } catch (e) { /* ignore */ }
   state.phrases = [exampleLick()];
+  rememberSaved();
+}
+
+// What each lick looked like when last saved, to know which ones changed.
+const savedJson = new Map();
+let savedOrder = '';
+const contentJson = (p) => JSON.stringify({ ...p, updatedAt: undefined });
+
+function rememberSaved() {
+  savedJson.clear();
+  for (const p of state.phrases) savedJson.set(p.id, contentJson(p));
+  savedOrder = state.phrases.map((p) => p.id).join();
+}
+
+// Give changed licks a new timestamp (the newest version wins when syncing).
+function stampChanges() {
+  const now = Date.now();
+  for (const p of state.phrases) {
+    const j = contentJson(p);
+    if (savedJson.get(p.id) !== j) {
+      p.updatedAt = now;
+      savedJson.set(p.id, j);
+    }
+  }
+  const order = state.phrases.map((p) => p.id).join();
+  if (order !== savedOrder) {
+    state.orderUpdatedAt = now;
+    savedOrder = order;
+  }
+}
+
+function writeLocal() {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({
+      version: 2, phrases: state.phrases, deleted: state.deleted, orderUpdatedAt: state.orderUpdatedAt,
+    }));
+  } catch (e) {
+    toast('Could not save in this browser (storage is full or blocked).');
+  }
 }
 
 let saveTimer = null;
 function save() {
   clearTimeout(saveTimer);
   saveTimer = setTimeout(() => {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify({ version: 1, phrases: state.phrases }));
-    } catch (e) {
-      toast('Could not save in this browser (storage is full or blocked).');
-    }
+    stampChanges();
+    writeLocal();
+    notifyChange();
   }, 250);
+}
+
+function syncData() {
+  stampChanges();
+  return { phrases: state.phrases, deleted: state.deleted, orderUpdatedAt: state.orderUpdatedAt };
+}
+
+// Apply licks merged from another device, re-drawing only what changed.
+function applySynced(data) {
+  const before = new Map(state.phrases.map((p) => [p.id, JSON.stringify(p)]));
+  const orderBefore = state.phrases.map((p) => p.id).join();
+  state.phrases = data.phrases;
+  state.deleted = data.deleted;
+  state.orderUpdatedAt = data.orderUpdatedAt;
+  rememberSaved();
+  writeLocal();
+  if (state.editingId && !byId(state.editingId)) { state.editingId = null; state.sel = null; }
+  if (player.currentId && !byId(player.currentId)) player.stop();
+  if (state.phrases.map((p) => p.id).join() !== orderBefore) return renderAll();
+  for (const p of state.phrases) {
+    if (before.get(p.id) === JSON.stringify(p)) continue;
+    const ref = cards.get(p.id);
+    if (ref && ref.el.contains(document.activeElement)) continue; // don't interrupt typing
+    if (state.editingId === p.id) state.sel = null;
+    rebuildCard(p.id);
+  }
 }
 
 const byId = (id) => state.phrases.find((p) => p.id === id);
@@ -833,6 +903,7 @@ function deletePhrase(id) {
   if (!confirm(`Delete “${p.title}”?`)) return;
   if (player.currentId === id) player.stop();
   state.phrases = state.phrases.filter((x) => x.id !== id);
+  state.deleted[id] = Date.now();
   if (state.editingId === id) state.editingId = null;
   save();
   renderAll();
@@ -963,6 +1034,120 @@ function importLicks(file) {
   reader.readAsText(file);
 }
 
+// ---------------------------------------------------------------- sync UI
+
+const SYNC_LABELS = {
+  off: 'Sync', idle: 'Synced', ok: 'Synced', pending: 'Saving…', syncing: 'Syncing…', offline: 'Offline', error: 'Sync problem',
+};
+
+function showSyncStatus(st) {
+  const btn = $('#sync-btn');
+  btn.dataset.state = st;
+  $('.sync-label', btn).textContent = SYNC_LABELS[st] || 'Sync';
+  btn.title = st === 'off' ? 'Sync your licks between devices' : `Sync: ${SYNC_LABELS[st]}`;
+  refreshSyncDialog();
+}
+
+let syncDialog = null;
+
+function timeAgo(t) {
+  if (!t) return 'not yet';
+  const s = Math.round((Date.now() - t) / 1000);
+  if (s < 10) return 'just now';
+  if (s < 60) return `${s} seconds ago`;
+  if (s < 3600) return `${Math.round(s / 60)} min ago`;
+  return new Date(t).toLocaleString();
+}
+
+function openSyncDialog() {
+  closeSyncDialog();
+  syncDialog = h('div', { class: 'modal-backdrop', onclick: (e) => { if (e.target === syncDialog) closeSyncDialog(); } },
+    h('div', { class: 'modal', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Sync' }));
+  document.body.append(syncDialog);
+  refreshSyncDialog();
+}
+
+function closeSyncDialog() {
+  if (syncDialog) syncDialog.remove();
+  syncDialog = null;
+}
+
+function appendAll(el, ...children) {
+  el.append(...children.filter(Boolean));
+}
+
+function refreshSyncDialog() {
+  if (!syncDialog) return;
+  const box = $('.modal', syncDialog);
+  const info = syncInfo();
+  const focusedInput = box.querySelector('input:focus');
+  if (focusedInput) return; // don't wipe what the user is typing
+  box.innerHTML = '';
+  const close = h('button', { class: 'modal-close', 'aria-label': 'Close', onclick: closeSyncDialog }, '×');
+  const error = info.detail && (info.status === 'error' || info.status === 'off')
+    ? h('p', { class: 'modal-error' }, info.detail) : null;
+
+  if (!info.on) {
+    const input = h('input', { type: 'password', class: 'token-input', placeholder: 'Paste your key (ghp_…)', autocomplete: 'off', spellcheck: 'false' });
+    const connectBtn = h('button', {
+      class: 'btn primary',
+      onclick: async () => {
+        connectBtn.disabled = true;
+        connectBtn.textContent = 'Connecting…';
+        try {
+          await connect(input.value);
+          toast('Sync is on.');
+        } catch (e) { /* message shown via status */ }
+        input.blur();
+        refreshSyncDialog();
+      },
+    }, 'Connect');
+    appendAll(box, close,
+      h('h2', {}, 'Sync between your devices'),
+      h('p', {}, 'Your licks are stored in a private gist (a small private file) on your GitHub account, so your phone and computer always show the same licks.'),
+      h('ol', { class: 'steps' },
+        h('li', {},
+          h('a', { href: 'https://github.com/settings/tokens/new?scopes=gist&description=JazzLicks%20sync', target: '_blank', rel: 'noopener' }, 'Create a GitHub key'),
+          ' (opens GitHub). The ', h('b', {}, 'gist'), ' box is already ticked — leave everything else. Set ', h('b', {}, 'Expiration'), ' to “No expiration”, then press ', h('b', {}, 'Generate token'), ' and copy it.'),
+        h('li', {}, 'Paste it here:', h('div', { class: 'token-row' }, input, connectBtn))),
+      error,
+      h('p', { class: 'muted' }, 'Already set up on another device? Open the sync link from that device instead — no key needed.'));
+    return;
+  }
+
+  const copyBtn = h('button', {
+    class: 'btn',
+    onclick: async () => {
+      try {
+        await navigator.clipboard.writeText(info.link);
+        toast('Link copied. Send it to yourself and open it on your other device.');
+      } catch (e) {
+        prompt('Copy this link:', info.link);
+      }
+    },
+  }, 'Copy link');
+  const shareBtn = navigator.share ? h('button', {
+    class: 'btn',
+    onclick: () => navigator.share({ title: 'JazzLicks sync link', url: info.link }).catch(() => {}),
+  }, 'Share…') : null;
+
+  appendAll(box, close,
+    h('h2', {}, 'Sync is on'),
+    h('p', {}, `Connected to GitHub as `, h('b', {}, info.login || '?'), `. Last synced: ${timeAgo(info.lastSync)}.`),
+    error,
+    h('h3', {}, 'Add your phone or another computer'),
+    h('p', {}, 'Send yourself this link (WhatsApp, email…) and open it on the other device. It turns sync on there automatically.'),
+    h('div', { class: 'link-row' }, copyBtn, shareBtn),
+    h('p', { class: 'muted' }, 'The link contains your key, so only send it to yourself.'),
+    h('div', { class: 'modal-actions' },
+      h('button', { class: 'btn danger-btn', onclick: () => { disconnect(); toast('Sync turned off on this device. Your licks stay here.'); refreshSyncDialog(); } }, 'Turn off on this device'),
+      h('button', { class: 'btn primary', onclick: () => syncNow().then(refreshSyncDialog) }, 'Sync now')));
+}
+
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && syncDialog) closeSyncDialog();
+}, true);
+
 // ---------------------------------------------------------------- boot
 
 function boot() {
@@ -976,6 +1161,14 @@ function boot() {
     fileInput.value = '';
   });
   renderAll();
+
+  $('#sync-btn').addEventListener('click', openSyncDialog);
+  initSync({
+    getData: syncData,
+    applyData: applySynced,
+    onStatus: showSyncStatus,
+    onMessage: (msg) => { toast(msg); refreshSyncDialog(); },
+  });
 
   let lastWidth = window.innerWidth;
   let resizeTimer = null;

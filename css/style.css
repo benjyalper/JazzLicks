@@ -286,6 +286,68 @@ button:disabled { cursor: default; opacity: 0.35; }
 .root.on, .root.pair button.on, .qual.on { background: var(--ink); color: var(--paper); border-color: var(--ink); }
 .picker-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
 
+/* ---------- sync */
+
+.sync-btn { display: inline-flex; align-items: center; gap: 6px; position: relative; }
+.sync-btn svg { width: 18px; height: 18px; }
+.sync-dot { width: 7px; height: 7px; border-radius: 50%; background: transparent; }
+.sync-btn[data-state='ok'] .sync-dot, .sync-btn[data-state='idle'] .sync-dot { background: #2f9e44; }
+.sync-btn[data-state='syncing'] .sync-dot, .sync-btn[data-state='pending'] .sync-dot { background: #f59f00; }
+.sync-btn[data-state='error'] .sync-dot, .sync-btn[data-state='offline'] .sync-dot { background: #e03131; }
+.sync-btn[data-state='off'] .sync-dot { display: none; }
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: rgba(31, 27, 22, 0.35);
+  display: grid;
+  place-items: center;
+  padding: 16px;
+}
+.modal {
+  position: relative;
+  width: min(480px, 100%);
+  max-height: calc(100vh - 32px);
+  overflow: auto;
+  background: var(--card);
+  border-radius: 16px;
+  box-shadow: 0 20px 60px rgba(31, 27, 22, 0.25);
+  padding: 20px 20px 18px;
+}
+.modal h2 { margin: 0 0 8px; font: 700 24px/1.2 'Kalam', cursive; }
+.modal h3 { margin: 16px 0 4px; font-size: 15px; }
+.modal p { margin: 6px 0; }
+.modal-close {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  width: 34px;
+  height: 34px;
+  border: none;
+  background: none;
+  border-radius: 50%;
+  font-size: 22px;
+  line-height: 1;
+}
+.modal-close:hover { background: var(--paper); }
+.steps { padding-left: 20px; margin: 10px 0; }
+.steps li { margin-bottom: 10px; }
+.steps a { color: var(--accent); font-weight: 700; }
+.token-row, .link-row { display: flex; gap: 8px; margin-top: 6px; flex-wrap: wrap; }
+.token-input {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 7px 12px;
+  background: #fff;
+}
+.muted { color: var(--ink-soft); font-size: 13px; }
+.modal-error { color: #b42318; font-size: 14px; }
+.modal-actions { display: flex; justify-content: space-between; gap: 8px; margin-top: 18px; flex-wrap: wrap; }
+.danger-btn { color: #b42318; }
+
 /* ---------- misc */
 
 .empty { text-align: center; padding: 60px 0; color: var(--ink-soft); }
@@ -315,6 +377,8 @@ button:disabled { cursor: default; opacity: 0.35; }
   .btn.ghost { padding: 6px 9px; font-size: 13px; }
   .actions { flex-wrap: nowrap; gap: 6px; }
   .long { display: none; }
+  .sync-label { display: none; }
+  .sync-btn { padding: 6px 9px; }
   .licks { padding: 14px 10px 8px; }
   .lick { padding: 12px 10px 14px; }
   .settings { padding-left: 0; }

@@ -20,6 +20,10 @@
       <h1>JazzLicks</h1>
     </div>
     <div class="actions">
+      <button id="sync-btn" class="btn ghost sync-btn" data-state="off" title="Sync your licks between devices">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 18h10a4 4 0 0 0 .6-7.96A6 6 0 0 0 6.1 9.2 4.5 4.5 0 0 0 7 18z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
+        <span class="sync-label">Sync</span><span class="sync-dot" aria-hidden="true"></span>
+      </button>
       <button id="import" class="btn ghost" title="Import licks from a file">Import</button>
       <button id="export" class="btn ghost" title="Save all licks to a file">Export</button>
       <button id="new-lick" class="btn primary">+ New<span class="long"> lick</span></button>
@@ -30,7 +34,7 @@
   <main id="licks" class="licks"></main>
 
   <footer class="foot">
-    Your licks are saved in this browser. Use Export to back them up or move them to another device.
+    Your licks are saved in this browser. Turn on Sync to keep them the same on your phone and computer, or use Export for a backup file.
   </footer>
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>

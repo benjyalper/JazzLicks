@@ -11,7 +11,7 @@ Write short jazz phrases (1–6 bars) on a treble staff, add chord symbols, and 
 - Play / pause per lick, with piano or guitar sounds, swing feel, tempo and loop
 - Key signatures (changing the key transposes all notes and chords), accidentals, dotted notes, triplets, rests, ties
 - A text box under each lick for your notes
-- Licks are saved in the browser; Export / Import moves them between devices
+- Licks are saved in the browser, and **Sync** keeps them the same on all your devices (via a private GitHub gist). Export / Import makes backup files
 
 ## Editing
 
@@ -41,3 +41,13 @@ python -m http.server 8000
 then open http://localhost:8000. (Opening `index.html` directly from disk won't work because browsers block ES modules on `file://`.)
 
 Sounds are streamed from the Tone.js Salamander piano and the tonejs-instruments guitar samples, so playback needs an internet connection.
+
+## Sync between devices
+
+Press **Sync** in the top bar:
+
+1. Create a GitHub key with the link in the dialog (only the `gist` permission is needed, and it's pre-selected).
+2. Paste it and press **Connect**. Your licks are stored in a private gist named `jazzlicks.json`.
+3. Press **Copy link** and open that link on your phone or other computer. Sync turns on there automatically.
+
+Each lick keeps the most recently edited version, and deletions carry over to other devices. The key stays in the browser on your devices; the sync link contains it, so only send it to yourself.
