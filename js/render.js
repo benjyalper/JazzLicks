@@ -1,6 +1,6 @@
 // Draws a phrase with VexFlow and answers "what did the user click on?".
 import {
-  MEASURE_TICKS, noteTicks, measureTicks, accidentalString, chordParts,
+  MEASURE_TICKS, DUR_TICKS, noteTicks, measureTicks, accidentalString, chordParts,
   diatonicIndex, MIN_DIATONIC, MAX_DIATONIC,
 } from './music.js';
 
@@ -15,26 +15,76 @@ const CHORD_BASELINE = TOP_LINE_OFFSET - 44; // chord row, relative to the syste
 const CHORD_ZONE = TOP_LINE_OFFSET - 37; // clicks above this y go to the chord row
 const F5 = diatonicIndex('F', 5); // pitch on the top staff line
 
-const PAD_STEPS = [[32, 'w'], [16, 'h'], [8, 'q'], [4, '8'], [2, '16'], [1, '32']];
+const PAD_STEPS = [[96, 'w'], [48, 'h'], [24, 'q'], [12, '8'], [6, '16'], [3, '32']];
+const TRIPLET_PAD_STEPS = [[16, 'q'], [8, '8'], [4, '16']];
+const HALF_BAR = MEASURE_TICKS / 2;
 
 // Rests that fill an incomplete measure, so it always looks like 4/4.
+// An unfinished triplet is completed with triplet rests first.
 function padRests(used) {
   const out = [];
   let pos = used;
   while (pos < MEASURE_TICKS) {
-    for (const [t, d] of PAD_STEPS) {
-      if (t <= MEASURE_TICKS - pos && pos % t === 0) {
-        out.push({ rest: true, dur: d, dots: 0, pad: true });
-        pos += t;
-        break;
-      }
+    const std = PAD_STEPS.find(([t]) => t <= MEASURE_TICKS - pos && pos % t === 0);
+    if (std) {
+      out.push({ rest: true, dur: std[1], dots: 0, pad: true });
+      pos += std[0];
+      continue;
     }
+    const toBeat = 24 - (pos % 24);
+    const trip = TRIPLET_PAD_STEPS.find(([t]) => t <= toBeat) || TRIPLET_PAD_STEPS[2];
+    out.push({ rest: true, dur: trip[1], dots: 0, trip: true, pad: true });
+    pos += trip[0];
   }
   return out;
 }
 
 function padTicks(n) {
-  return { w: 32, h: 16, q: 8, '8': 4, '16': 2, '32': 1 }[n.dur];
+  return n.dur === '32' ? 3 : noteTicks(n);
+}
+
+// Group consecutive triplet notes into "3 in the time of 2" units.
+function tripletGroups(items) {
+  const groups = [];
+  let cur = null;
+  for (const it of items) {
+    if (!it.note.trip) {
+      if (cur) groups.push(cur);
+      cur = null;
+      continue;
+    }
+    if (!cur) cur = { items: [], sum: 0, target: 2 * DUR_TICKS[it.note.dur] };
+    cur.items.push(it);
+    it.group = groups.length;
+    cur.sum += padTicks(it.note);
+    if (cur.sum >= cur.target) {
+      groups.push(cur);
+      cur = null;
+    }
+  }
+  if (cur) groups.push(cur);
+  return groups;
+}
+
+const beamable = (n) => !n.rest && (n.dur === '8' || n.dur === '16');
+
+// Beam eighths/sixteenths per half bar (jazz style), and each triplet on its own.
+function makeBeams(items) {
+  const beams = [];
+  let run = [];
+  let key = null;
+  const flush = () => {
+    if (run.length >= 2) beams.push(new VF.Beam(run.map((it) => it.sn), true));
+    run = [];
+  };
+  for (const it of items) {
+    const k = it.group !== undefined ? `t${it.group}` : `h${Math.floor(it.tick / HALF_BAR)}`;
+    if (!beamable(it.note) || k !== key) flush();
+    key = k;
+    if (beamable(it.note)) run.push(it);
+  }
+  flush();
+  return beams;
 }
 
 function makeStaveNote(n) {
@@ -106,7 +156,7 @@ export function renderPhrase(host, phrase, opts = {}) {
       let tick = 0;
       const sns = items.map((it) => {
         const sn = makeStaveNote(it.note);
-        if (it.pad && opts.editing) sn.setStyle(PADDED);
+        if ((it.pad || it.note.hold) && opts.editing) sn.setStyle(PADDED);
         if (!it.pad && opts.selected && opts.selected.m === m && opts.selected.i === it.i) {
           sn.setStyle(SELECTED);
         }
@@ -116,13 +166,20 @@ export function renderPhrase(host, phrase, opts = {}) {
         return sn;
       });
 
+      const tuplets = tripletGroups(items).map((g) => new VF.Tuplet(g.items.map((it) => it.sn), {
+        num_notes: 3,
+        notes_occupied: 2,
+        ratioed: false,
+        bracketed: !(g.items.length >= 2 && g.items.every((it) => beamable(it.note))),
+      }));
       const voice = new VF.Voice({ num_beats: 4, beat_value: 4 }).setMode(VF.Voice.Mode.SOFT);
       voice.addTickables(sns);
       VF.Accidental.applyAccidentals([voice], phrase.keySig);
-      const beams = VF.Beam.generateBeams(sns, { groups: [new VF.Fraction(2, 4)] });
+      const beams = makeBeams(items);
       new VF.Formatter().joinVoices([voice]).formatToStave([voice], stave);
       voice.draw(ctx, stave);
       beams.forEach((b) => b.setContext(ctx).draw());
+      tuplets.forEach((t) => t.setContext(ctx).draw());
 
       for (const it of items) {
         const info = {
@@ -191,7 +248,7 @@ function drawChords(svg, phrase, layout, opts) {
     const chords = phrase.measures[ml.m].chords || [null, null];
     for (let slot = 0; slot < 2; slot++) {
       const chord = chords[slot];
-      const x = slot === 0 ? Math.min(tickX(ml, 0), ml.noteStart + 4) - 2 : tickX(ml, 16) - 2;
+      const x = slot === 0 ? Math.min(tickX(ml, 0), ml.noteStart + 4) - 2 : tickX(ml, HALF_BAR) - 2;
       const y = ml.lineTop + CHORD_BASELINE;
       if (chord) {
         const parts = chordParts(chord);
@@ -242,7 +299,7 @@ export function hitTest(layout, x, y) {
   const ml = measureAt(layout, x, y);
   if (!ml) return null;
   if (y < ml.lineTop + CHORD_ZONE) {
-    const mid = tickX(ml, 16) - 6;
+    const mid = tickX(ml, HALF_BAR) - 6;
     return { type: 'chord', m: ml.m, slot: x < mid ? 0 : 1 };
   }
   const diatonic = diatonicAt(ml, y);
@@ -252,6 +309,8 @@ export function hitTest(layout, x, y) {
     const d = Math.abs(nt.x - x);
     if (d < 13 && (!best || d < best.d)) best = { nt, d };
   }
+  // Clicking a triplet placeholder means "put a note here".
+  if (best && best.nt.note.hold) return { type: 'staff', m: ml.m, insertIndex: best.nt.i, diatonic };
   if (best) return { type: 'note', m: ml.m, i: best.nt.i, diatonic };
   const insertIndex = inMeasure.filter((nt) => nt.x < x).length;
   return { type: 'staff', m: ml.m, insertIndex, diatonic };

@@ -3,13 +3,17 @@
 export const STEPS = ['C', 'D', 'E', 'F', 'G', 'A', 'B'];
 const STEP_PC = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 };
 
-// Ticks: a 4/4 measure is 32 ticks (one tick = a 32nd note).
-export const MEASURE_TICKS = 32;
-export const DUR_TICKS = { w: 32, h: 16, q: 8, '8': 4, '16': 2 };
+// Ticks: a beat is 24 ticks so both straight and triplet values are whole
+// numbers (eighth = 12, eighth triplet = 8, sixteenth = 6 ...).
+export const BEAT_TICKS = 24;
+export const MEASURE_TICKS = 4 * BEAT_TICKS;
+export const DUR_TICKS = { w: 96, h: 48, q: 24, '8': 12, '16': 6 };
 export const DURATIONS = ['16', '8', 'q', 'h', 'w'];
+export const TRIPLET_DURATIONS = ['16', '8', 'q'];
 
 export function noteTicks(n) {
   const base = DUR_TICKS[n.dur];
+  if (n.trip) return (base * 2) / 3;
   return n.dots ? base * 1.5 : base;
 }
 
@@ -65,11 +69,11 @@ export function midi(n) {
 }
 
 export function accidentalString(alter) {
-  return alter === 1 ? '#' : alter === -1 ? 'b' : '';
+  return { 2: '##', 1: '#', '-1': 'b', '-2': 'bb' }[alter] || '';
 }
 
 export function pitchLabel(n) {
-  const acc = n.alter === 1 ? '♯' : n.alter === -1 ? '♭' : '';
+  const acc = { 2: '𝄪', 1: '♯', '-1': '♭', '-2': '𝄫' }[n.alter] || '';
   return `${n.step}${acc}${n.oct}`;
 }
 
@@ -128,4 +132,70 @@ export function chordVoicing(chord) {
     notes.push(m);
   }
   return notes.sort((a, b) => a - b);
+}
+
+// ---------------------------------------------------------------- transposing
+
+const KEY_TONIC = {
+  C: ['C', 0], G: ['G', 0], D: ['D', 0], A: ['A', 0], E: ['E', 0], B: ['B', 0],
+  F: ['F', 0], Bb: ['B', -1], Eb: ['E', -1], Ab: ['A', -1], Db: ['D', -1], Gb: ['G', -1],
+};
+
+// Interval between two major keys as (letter steps, semitones), choosing the
+// direction given by `dir` (+1 up, -1 down).
+function keyInterval(fromKey, toKey, dir) {
+  const [fl, fa] = KEY_TONIC[fromKey];
+  const [tl, ta] = KEY_TONIC[toKey];
+  let steps = STEPS.indexOf(tl) - STEPS.indexOf(fl);
+  let semis = STEP_PC[tl] + ta - (STEP_PC[fl] + fa);
+  if (dir > 0 && semis < 0) { steps += 7; semis += 12; }
+  if (dir < 0 && semis > 0) { steps -= 7; semis -= 12; }
+  if (dir > 0 && semis === 0 && steps < 0) steps += 7;
+  return { steps, semis };
+}
+
+function transposeNote(n, iv) {
+  if (n.rest) return { ...n };
+  const target = midi(n) + iv.semis;
+  const { step, oct } = fromDiatonic(diatonicIndex(n.step, n.oct) + iv.steps);
+  const natural = (oct + 1) * 12 + STEP_PC[step];
+  return { ...n, step, oct, alter: target - natural };
+}
+
+function spellRoot(pc, preferFlats) {
+  const names = CHORD_ROOTS[((pc % 12) + 12) % 12];
+  return names.length === 1 ? names[0] : preferFlats ? names[1] : names[0];
+}
+
+function transposeRoot(root, iv, toKey) {
+  const letter = STEPS[(((STEPS.indexOf(root[0]) + iv.steps) % 7) + 7) % 7];
+  const pc = rootPc(root) + iv.semis;
+  let alter = (((pc - STEP_PC[letter]) % 12) + 18) % 12 - 6; // -6..5
+  if (alter < -1 || alter > 1) return spellRoot(pc, isFlatKey(toKey));
+  return letter + (alter === 1 ? '#' : alter === -1 ? 'b' : '');
+}
+
+/**
+ * Move every note and chord of `phrase` from its key to `toKey`, picking the
+ * nearer direction (up or down) that keeps all notes in the writable range.
+ * Returns a new measures array.
+ */
+export function transposeMeasures(measures, fromKey, toKey) {
+  const up = keyInterval(fromKey, toKey, 1);
+  const down = keyInterval(fromKey, toKey, -1);
+  const order = up.semis <= -down.semis ? [up, down] : [down, up];
+  const apply = (iv) => measures.map((m) => ({
+    chords: (m.chords || [null, null]).map((c) => (c ? { ...c, root: transposeRoot(c.root, iv, toKey) } : null)),
+    notes: m.notes.map((n) => transposeNote(n, iv)),
+  }));
+  const inRange = (ms) => ms.every((m) => m.notes.every((n) => {
+    if (n.rest) return true;
+    const d = diatonicIndex(n.step, n.oct);
+    return d >= MIN_DIATONIC && d <= MAX_DIATONIC;
+  }));
+  for (const iv of order) {
+    const result = apply(iv);
+    if (inRange(result)) return result;
+  }
+  return apply(order[0]);
 }

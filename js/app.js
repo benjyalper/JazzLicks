@@ -1,5 +1,5 @@
 import {
-  KEY_SIGS, DURATIONS, MEASURE_TICKS, CHORD_QUALITIES, CHORD_ROOTS,
+  KEY_SIGS, DURATIONS, TRIPLET_DURATIONS, DUR_TICKS, MEASURE_TICKS, transposeMeasures, CHORD_QUALITIES, CHORD_ROOTS,
   keyAlter, isFlatKey, fromDiatonic, diatonicIndex, MIN_DIATONIC, MAX_DIATONIC,
   noteTicks, measureTicks, midi, prettyRoot, pitchLabel, STEPS,
 } from './music.js';
@@ -15,7 +15,7 @@ const state = {
   phrases: [],
   editingId: null,
   sel: null, // { m, i } in the phrase being edited
-  tool: { dur: '8', dots: 0 },
+  tool: { dur: '8', dots: 0, trip: false },
   undo: [], // [{ id, json }]
 };
 const cards = new Map(); // id -> { el, host, layout, playBtn, ... }
@@ -201,7 +201,7 @@ function buildCard(p) {
 
   const keySel = h('select', {
     'aria-label': 'Key signature',
-    onchange: (e) => { snapshot(p); p.keySig = e.target.value; save(); drawStave(p.id); },
+    onchange: (e) => changeKey(p, e.target.value),
   }, KEY_SIGS.map((k) => h('option', { value: k.key, selected: k.key === p.keySig }, k.label)));
 
   const tempo = h('input', {
@@ -274,7 +274,7 @@ function hintText() {
   const touch = matchMedia('(pointer: coarse)').matches;
   return touch
     ? 'Tap the staff to add a note, tap a note to select it, tap above the staff to add a chord.'
-    : 'Click the staff to add a note · click above it for a chord · keys: A–G notes, ↑↓ pitch, 1–5 length, . dot, R rest, T tie, ⌫ delete, Space play.';
+    : 'Click the staff to add a note · click above it for a chord · keys: A–G notes, ↑↓ pitch, 1–5 length, . dot, / triplet, R rest, T tie, ⌫ delete, Space play.';
 }
 
 function buildToolbar(p) {
@@ -289,6 +289,11 @@ function buildToolbar(p) {
   }));
   const curDots = sel ? sel.dots : state.tool.dots;
   const dotBtn = h('button', { class: 'tb' + (curDots ? ' on' : ''), title: 'Dotted (.)', onclick: toggleDot }, '•');
+  const curTrip = state.tool.trip;
+  const tripBtn = h('button', {
+    class: 'tb' + (curTrip ? ' on' : ''), title: 'Enter triplets (/)', 'aria-label': 'Triplets', onclick: toggleTrip,
+    html: '<svg viewBox="0 0 26 20" class="trip-icon" aria-hidden="true"><path d="M2 9V4h22v5" fill="none" stroke="currentColor" stroke-width="1.6"/><text x="13" y="19" text-anchor="middle" font-size="11" font-weight="700" fill="currentColor" font-family="DM Sans, sans-serif">3</text></svg>',
+  });
   const restBtn = h('button', {
     class: 'tb wide' + (sel && sel.rest ? ' on' : ''), title: sel ? 'Make rest / note (R)' : 'Add a rest (R)', onclick: toggleRest,
   }, sel && sel.rest ? 'Note' : 'Rest');
@@ -303,7 +308,7 @@ function buildToolbar(p) {
   });
 
   tb.append(
-    group(...durBtns, dotBtn, restBtn),
+    group(...durBtns, dotBtn, tripBtn, restBtn),
     group(accBtn(-1, '♭', 'Flat (-)'), accBtn(0, '♮', 'Natural (N)'), accBtn(1, '♯', 'Sharp (+)'), tieBtn),
     group(
       h('button', { class: 'tb', title: 'Pitch up (↑)', disabled: !sel || sel.rest, onclick: () => movePitch(1) }, '▲'),
@@ -408,7 +413,7 @@ function attachStaveEvents(p, host) {
     }
     if (hit.type === 'staff') {
       const { step, oct } = fromDiatonic(hit.diatonic);
-      const note = { rest: false, step, oct, alter: keyAlter(p.keySig, step), dur: state.tool.dur, dots: state.tool.dots, tie: false };
+      const note = { rest: false, step, oct, alter: keyAlter(p.keySig, step), dur: state.tool.dur, dots: state.tool.dots, trip: state.tool.trip, tie: false };
       insertNote(p, hit.m, hit.insertIndex, note);
     }
   });
@@ -438,22 +443,45 @@ function fits(measure, extraTicks, minusTicks = 0) {
   return measureTicks(measure) - minusTicks + extraTicks <= MEASURE_TICKS;
 }
 
+// A placeholder rest that keeps an unfinished triplet group complete.
+const holdRest = (dur) => ({ rest: true, dur, dots: 0, trip: true, hold: true, tie: false });
+
 function insertNote(p, m, index, note) {
   if (note.dur === '16') note.dots = 0;
+  if (note.trip && !TRIPLET_DURATIONS.includes(note.dur)) note.trip = false;
+  if (note.trip) note.dots = 0;
   let measure = p.measures[m];
-  if (!fits(measure, noteTicks(note))) {
+
+  // Filling a triplet placeholder of the same length: just replace it.
+  const at = measure.notes[index];
+  if (note.trip && at && at.hold && at.dur === note.dur) {
+    snapshot(p);
+    measure.notes[index] = note;
+    state.sel = { m, i: index };
+    audition(p, note);
+    changed(p);
+    return true;
+  }
+  // Never split a triplet group: move past its placeholders.
+  while (measure.notes[index] && measure.notes[index].hold) index++;
+
+  // A new triplet note starts a whole group of three (note + 2 placeholders).
+  const group = note.trip ? [note, holdRest(note.dur), holdRest(note.dur)] : [note];
+  const needed = group.reduce((sum, n) => sum + noteTicks(n), 0);
+  if (!fits(measure, needed)) {
     // Typing past the end of a full bar continues in the next bar.
-    if (index >= measure.notes.length && m + 1 < p.measures.length && fits(p.measures[m + 1], noteTicks(note))) {
+    if (index >= measure.notes.length && m + 1 < p.measures.length && fits(p.measures[m + 1], needed)) {
       m += 1;
       index = 0;
       measure = p.measures[m];
     } else {
-      toast(`Not enough room in bar ${m + 1} for a ${DUR_NAMES[note.dur].toLowerCase()} note.`);
+      const what = note.trip ? `a ${DUR_NAMES[note.dur].toLowerCase()} triplet` : `a ${DUR_NAMES[note.dur].toLowerCase()} note`;
+      toast(`Not enough room in bar ${m + 1} for ${what}.`);
       return false;
     }
   }
   snapshot(p);
-  measure.notes.splice(index, 0, note);
+  measure.notes.splice(index, 0, ...group);
   state.sel = { m, i: index };
   audition(p, note);
   changed(p);
@@ -462,10 +490,15 @@ function insertNote(p, m, index, note) {
 
 function setDuration(dur) {
   state.tool.dur = dur;
+  if (!TRIPLET_DURATIONS.includes(dur)) state.tool.trip = false;
   const p = editing();
   const note = selectedNote();
   if (p && note) {
     const measure = p.measures[state.sel.m];
+    if (note.trip && dur !== note.dur) {
+      toast('To change a triplet\'s length, delete it and enter it again.');
+      return refreshToolbar();
+    }
     const next = { ...note, dur, dots: dur === '16' ? 0 : note.dots };
     if (!fits(measure, noteTicks(next), noteTicks(note))) {
       toast('That note is too long for the space left in this bar.');
@@ -483,6 +516,7 @@ function toggleDot() {
   const note = selectedNote();
   if (p && note) {
     if (note.dur === '16') return toast('Dotted sixteenths aren\'t supported.');
+    if (note.trip) return toast('Triplet notes can\'t be dotted.');
     const next = { ...note, dots: note.dots ? 0 : 1 };
     if (!fits(p.measures[state.sel.m], noteTicks(next), noteTicks(note))) return toast('Not enough room in this bar for a dot.');
     snapshot(p);
@@ -491,7 +525,31 @@ function toggleDot() {
     return changed(p);
   }
   state.tool.dots = state.tool.dots ? 0 : 1;
+  if (state.tool.dots) state.tool.trip = false;
   refreshToolbar();
+}
+
+// Triplet mode: new notes are entered as triplets.
+function toggleTrip() {
+  state.tool.trip = !state.tool.trip;
+  if (state.tool.trip) {
+    state.tool.dots = 0;
+    if (!TRIPLET_DURATIONS.includes(state.tool.dur)) state.tool.dur = '8';
+  }
+  refreshToolbar();
+}
+
+function changeKey(p, toKey) {
+  if (toKey === p.keySig) return;
+  snapshot(p);
+  p.measures = transposeMeasures(p.measures, p.keySig, toKey);
+  p.keySig = toKey;
+  save();
+  drawStave(p.id);
+  refreshToolbar();
+  restartIfPlaying(p.id);
+  const ks = KEY_SIGS.find((k) => k.key === toKey);
+  toast(`Transposed to ${ks ? ks.label : toKey}`);
 }
 
 function toggleRest() {
@@ -501,6 +559,7 @@ function toggleRest() {
   if (note) {
     snapshot(p);
     if (note.rest) {
+      delete note.hold;
       const prev = previousPitched(p, state.sel.m, state.sel.i);
       Object.assign(note, { rest: false, step: prev ? prev.step : 'B', oct: prev ? prev.oct : 4, alter: prev ? prev.alter : keyAlter(p.keySig, 'B') });
     } else {
@@ -510,7 +569,7 @@ function toggleRest() {
     return changed(p);
   }
   // No selection: add a rest at the end of the first bar with room.
-  const rest = { rest: true, dur: state.tool.dur, dots: state.tool.dots, tie: false };
+  const rest = { rest: true, dur: state.tool.dur, dots: state.tool.dots, trip: state.tool.trip, tie: false };
   const m = p.measures.findIndex((ms) => fits(ms, noteTicks(rest)));
   if (m < 0) return toast('All bars are full.');
   insertNote(p, m, p.measures[m].notes.length, rest);
@@ -572,12 +631,34 @@ function deleteSelected() {
   if (!p || !state.sel) return;
   snapshot(p);
   const { m, i } = state.sel;
-  p.measures[m].notes.splice(i, 1);
+  const notes = p.measures[m].notes;
+  const note = notes[i];
+  if (note.trip) {
+    // Inside a triplet the note becomes a placeholder; a group that is all
+    // placeholders disappears.
+    notes[i] = holdRest(note.dur);
+    removeEmptyTriplets(notes);
+  } else {
+    notes.splice(i, 1);
+  }
   const list = flatIndex(p);
   // Select the note before the deleted one (or nothing).
   const before = list.filter((s) => s.m < m || (s.m === m && s.i < i));
   state.sel = before.length ? before[before.length - 1] : null;
   changed(p);
+}
+
+function removeEmptyTriplets(notes) {
+  let k = 0;
+  while (k < notes.length) {
+    if (!notes[k].trip) { k++; continue; }
+    const target = 2 * DUR_TICKS[notes[k].dur];
+    let j = k;
+    let sum = 0;
+    while (j < notes.length && notes[j].trip && sum < target) sum += noteTicks(notes[j++]);
+    if (notes.slice(k, j).every((n) => n.hold)) notes.splice(k, j - k);
+    else k = j;
+  }
 }
 
 function previousPitched(p, m, i) {
@@ -615,7 +696,7 @@ function typeLetter(step) {
     if (best === null || Math.abs(d - ref) < Math.abs(best - ref)) best = d;
   }
   const { oct } = fromDiatonic(best);
-  insertNote(p, m, index, { rest: false, step, oct, alter: keyAlter(p.keySig, step), dur: state.tool.dur, dots: state.tool.dots, tie: false });
+  insertNote(p, m, index, { rest: false, step, oct, alter: keyAlter(p.keySig, step), dur: state.tool.dur, dots: state.tool.dots, trip: state.tool.trip, tie: false });
 }
 
 function changeMeasures(delta) {
@@ -837,6 +918,7 @@ document.addEventListener('keydown', (e) => {
     case '.': handled(); return toggleDot();
     case 'r': case 'R': case '0': handled(); return toggleRest();
     case 't': case 'T': handled(); return toggleTie();
+    case '/': handled(); return toggleTrip();
     case '+': case '=': case '#': handled(); return setAlter(1);
     case '-': case '_': handled(); return setAlter(-1);
     case 'n': case 'N': handled(); return setAlter(0);

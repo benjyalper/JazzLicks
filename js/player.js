@@ -1,5 +1,5 @@
 // Playback with Tone.js: sampled piano or guitar, swing feel, chords + melody.
-import { MEASURE_TICKS, noteTicks, midi, chordVoicing } from './music.js';
+import { MEASURE_TICKS, BEAT_TICKS, noteTicks, midi, chordVoicing } from './music.js';
 
 function sampleUrls(names) {
   const urls = {};
@@ -20,12 +20,13 @@ const INSTRUMENTS = {
     strum: 0,
   },
   guitar: {
-    baseUrl: 'https://nbrosowsky.github.io/tonejs-instruments/samples/guitar-electric/',
-    urls: sampleUrls(['E2', 'Fs2', 'A2', 'C3', 'Ds3', 'Fs3', 'A3', 'C4', 'Ds4', 'Fs4', 'A4', 'C5', 'Ds5', 'Fs5', 'A5', 'C6']),
-    release: 0.8,
-    melodyVel: 0.9,
-    chordVel: 0.5,
-    strum: 0.022,
+    // Classical nylon-string guitar
+    baseUrl: 'https://nbrosowsky.github.io/tonejs-instruments/samples/guitar-nylon/',
+    urls: sampleUrls(['E2', 'Fs2', 'A2', 'Cs3', 'D3', 'E3', 'Fs3', 'G3', 'A3', 'Cs4', 'Ds4', 'E4', 'Fs4', 'A4', 'Cs5', 'D5', 'E5', 'Fs5', 'A5']),
+    release: 1,
+    melodyVel: 0.95,
+    chordVel: 0.55,
+    strum: 0.028,
   },
 };
 
@@ -49,12 +50,13 @@ function loadInstrument(name) {
   return loaded[name];
 }
 
-// Convert a tick position (32 per measure, 8 per beat) to seconds, with an
-// optional swing feel: off-beat eighths land 2/3 of the way through the beat.
+// Convert a tick position (24 per beat) to seconds, with an optional swing
+// feel: off-beat eighths land 2/3 of the way through the beat. Triplets are
+// already "swung", so positions off the straight sixteenth grid are left alone.
 function tickToSeconds(tick, tempo, swing) {
-  const beat = Math.floor(tick / 8);
-  let frac = (tick % 8) / 8;
-  if (swing) frac = frac < 0.5 ? frac * (4 / 3) : 2 / 3 + (frac - 0.5) * (2 / 3);
+  const beat = Math.floor(tick / BEAT_TICKS);
+  let frac = (tick % BEAT_TICKS) / BEAT_TICKS;
+  if (swing && tick % 6 === 0) frac = frac < 0.5 ? frac * (4 / 3) : 2 / 3 + (frac - 0.5) * (2 / 3);
   return (beat + frac) * (60 / tempo);
 }
 
@@ -108,7 +110,7 @@ export function buildEvents(phrase) {
   const chordList = [];
   phrase.measures.forEach((measure, m) => {
     (measure.chords || []).forEach((c, slot) => {
-      if (c) chordList.push({ chord: c, tick: m * MEASURE_TICKS + slot * 16 });
+      if (c) chordList.push({ chord: c, tick: m * MEASURE_TICKS + (slot * MEASURE_TICKS) / 2 });
     });
   });
   const total = phrase.measures.length * MEASURE_TICKS;
