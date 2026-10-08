@@ -168,12 +168,12 @@ function loadInstrument(name) {
 }
 
 // Convert a tick position (24 per beat) to seconds, with an optional swing
-// feel: off-beat eighths land 2/3 of the way through the beat. Triplets are
-// already "swung", so positions off the straight sixteenth grid are left alone.
+// feel: the off-beat eighth lands 2/3 of the way through the beat. Only the
+// eighth-note grid swings; triplets and sixteenths keep their even spacing.
 function tickToSeconds(tick, tempo, swing) {
   const beat = Math.floor(tick / BEAT_TICKS);
   let frac = (tick % BEAT_TICKS) / BEAT_TICKS;
-  if (swing && tick % 6 === 0) frac = frac < 0.5 ? frac * (4 / 3) : 2 / 3 + (frac - 0.5) * (2 / 3);
+  if (swing && tick % 12 === 0 && frac === 0.5) frac = 2 / 3;
   return (beat + frac) * (60 / tempo);
 }
 
@@ -192,6 +192,19 @@ export function buildEvents(phrase) {
   const span = (t, d) => Math.max(0.05, sec(t + d) - sec(t));
   const events = [];
 
+  // In swing, a beat containing sixteenths is played straight (16ths are even).
+  const straightBeats = new Set();
+  phrase.measures.forEach((measure, m) => {
+    let tick = m * MEASURE_TICKS;
+    for (const note of measure.notes) {
+      const end = tick + noteTicks(note);
+      if (tick % 12 === 6) straightBeats.add(Math.floor(tick / BEAT_TICKS));
+      if (end % 12 === 6) straightBeats.add(Math.floor(end / BEAT_TICKS));
+      tick = end;
+    }
+  });
+  const melSec = (t) => tickToSeconds(t + offset, tempo, !latin && !straightBeats.has(Math.floor(t / BEAT_TICKS)));
+
   // Melody (ties merge into one long note)
   const flat = [];
   phrase.measures.forEach((measure, m) => {
@@ -204,13 +217,13 @@ export function buildEvents(phrase) {
   for (let k = 0; k < flat.length; k++) {
     const f = flat[k];
     if (f.note.rest) {
-      events.push({ kind: 'mark', time: sec(f.start), m: f.m, i: f.i });
+      events.push({ kind: 'mark', time: melSec(f.start), m: f.m, i: f.i });
       continue;
     }
     const prev = flat[k - 1];
     const tiedFromPrev = prev && prev.note.tie && !prev.note.rest && midi(prev.note) === midi(f.note);
     if (tiedFromPrev) {
-      events.push({ kind: 'mark', time: sec(f.start), m: f.m, i: f.i });
+      events.push({ kind: 'mark', time: melSec(f.start), m: f.m, i: f.i });
       continue;
     }
     let end = f.end;
@@ -223,7 +236,7 @@ export function buildEvents(phrase) {
     // A tie at the very end of the phrase lets the note ring a little longer.
     const last = flat.length && end === flat[flat.length - 1].end && flat[flat.length - 1].note.tie;
     events.push({
-      kind: 'melody', time: sec(f.start), dur: Math.max(0.05, sec(end) - sec(f.start)) + (last ? 0.6 : 0),
+      kind: 'melody', time: melSec(f.start), dur: Math.max(0.05, melSec(end) - melSec(f.start)) + (last ? 0.6 : 0),
       notes: [noteName(midi(f.note))], m: f.m, i: f.i,
     });
   }

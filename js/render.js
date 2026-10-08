@@ -69,8 +69,12 @@ function tripletGroups(items) {
 
 const beamable = (n) => !n.rest && (n.dur === '8' || n.dur === '16');
 
-// Beam eighths/sixteenths per half bar (jazz style), and each triplet on its own.
+// Beam eighths in half bars (jazz style); any half bar with sixteenths is
+// beamed beat by beat instead, and each triplet gets its own beam.
 function makeBeams(items) {
+  const sixteenthHalves = new Set(items
+    .filter((it) => !it.note.rest && !it.note.trip && it.note.dur === '16')
+    .map((it) => Math.floor(it.tick / HALF_BAR)));
   const beams = [];
   let run = [];
   let key = null;
@@ -79,7 +83,10 @@ function makeBeams(items) {
     run = [];
   };
   for (const it of items) {
-    const k = it.group !== undefined ? `t${it.group}` : `h${Math.floor(it.tick / HALF_BAR)}`;
+    const half = Math.floor(it.tick / HALF_BAR);
+    let k = `h${half}`;
+    if (it.group !== undefined) k = `t${it.group}`;
+    else if (sixteenthHalves.has(half)) k = `b${Math.floor(it.tick / 24)}`;
     if (!beamable(it.note) || k !== key) flush();
     key = k;
     if (beamable(it.note)) run.push(it);
