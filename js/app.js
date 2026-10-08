@@ -327,7 +327,12 @@ function buildCard(p) {
       check('Drums', 'drums', true)),
     h('div', { class: 'checks' },
       check('Count-in', 'countIn'),
-      check('Loop', 'loop')));
+      check('Loop', 'loop'),
+      h('label', { class: 'check' },
+        h('input', {
+          type: 'checkbox', checked: p.degrees !== false,
+          onchange: (e) => { p.degrees = e.target.checked; save(); drawStave(p.id); },
+        }), 'Degrees')));
 
   const host = h('div', { class: 'stave-host' + (isEditing ? ' editing' : '') });
   const notes = h('textarea', {
@@ -433,6 +438,7 @@ function drawStave(id) {
     ref.layout = renderPhrase(ref.host, p, {
       width: ref.host.clientWidth,
       editing: isEditing,
+      degrees: p.degrees !== false,
       selected: isEditing ? state.sel : null,
     });
   } catch (e) {

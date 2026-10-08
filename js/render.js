@@ -1,8 +1,9 @@
 // Draws a phrase with VexFlow and answers "what did the user click on?".
 import {
   MEASURE_TICKS, DUR_TICKS, noteTicks, measureTicks, accidentalString, chordParts,
-  diatonicIndex, MIN_DIATONIC, MAX_DIATONIC,
+  diatonicIndex, MIN_DIATONIC, MAX_DIATONIC, midi, chordDegree,
 } from './music.js';
+import { chordList } from './backing.js';
 
 const VF = Vex.Flow;
 const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -138,6 +139,7 @@ export function renderPhrase(host, phrase, opts = {}) {
 
   const layout = { svg, width, scale, offsetY: 0, perLine, measures: [], notes: [], chords: [] };
   const real = []; // real (non-pad) notes in order, for ties
+  const chords = chordList(phrase);
   let cursor = 0;
 
   for (let L = 0; L < lineCount; L++) {
@@ -218,6 +220,7 @@ export function renderPhrase(host, phrase, opts = {}) {
       lineMeasures.push(layout.measures[layout.measures.length - 1]);
       x += w;
     }
+    if (opts.degrees) drawDegrees(group, lineMeasures, real, chords);
     ctx.closeGroup();
     // Start the next system below whatever this one actually drew (long stems, beams…).
     let bottom = bandBottom;
@@ -253,6 +256,43 @@ function fitToContent(svg, layout, height, pixelWidth, scale) {
   svg.setAttribute('width', pixelWidth);
   svg.style.width = `${pixelWidth}px`;
   layout.offsetY = top;
+}
+
+// Chord-degree numbers (1, 3, 5, 7, 9 …) in a row under each system.
+function drawDegrees(group, lineMeasures, real, chords) {
+  let below = lineMeasures[0].stave.getYForLine(4) + 26;
+  try {
+    const bb = group.getBBox();
+    below = Math.max(below, Math.ceil(bb.y + bb.height) + 16);
+  } catch (e) { /* ignore */ }
+  const rowRight = [-Infinity, -Infinity]; // right edge of the last label in each row
+  for (const ml of lineMeasures) {
+    for (const it of ml.items) {
+      if (it.pad || it.note.rest) continue;
+      const k = real.findIndex((r) => r.sn === it.sn);
+      const prev = real[k - 1];
+      if (prev && prev.note.tie && !prev.note.rest && midi(prev.note) === midi(it.note)) continue; // tied: same note
+      const tick = ml.m * MEASURE_TICKS + it.tick;
+      let chord = null;
+      for (const c of chords) if (c.tick <= tick) chord = c.chord;
+      if (!chord) continue;
+      const deg = chordDegree(it.note, chord);
+      const t = document.createElementNS(SVG_NS, 'text');
+      t.setAttribute('x', it.sn.getAbsoluteX() + it.sn.getGlyphWidth() / 2);
+      t.setAttribute('y', below);
+      t.setAttribute('text-anchor', 'middle');
+      t.setAttribute('class', deg.chordTone ? 'degree' : 'degree tension');
+      t.textContent = deg.label;
+      group.appendChild(t);
+      // Crowded notes: drop a label to a second row instead of overlapping.
+      const x = Number(t.getAttribute('x'));
+      const w = t.getComputedTextLength ? t.getComputedTextLength() : 12;
+      let row = x - w / 2 < rowRight[0] + 2 ? 1 : 0;
+      if (row === 1 && x - w / 2 < rowRight[1] + 2) row = 0;
+      if (row === 1) t.setAttribute('y', below + 14);
+      rowRight[row] = x + w / 2;
+    }
+  }
 }
 
 function drawTies(ctx, real) {

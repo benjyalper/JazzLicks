@@ -12,6 +12,7 @@ Write short jazz phrases (1–6 bars) on a treble staff, add chord symbols, and 
 - Rhythm section generated from the chords: **Swing** (walking bass, ride cymbal, hi-hat on 2 & 4) or **Latin** (bossa nova bass, shaker, cross-stick, kick). Bass and drums can each be switched off
 - Chords can be **Held** (sustained), **Comping** (rhythmic, in the style) or **Off**
 - Key signatures (changing the key transposes all notes and chords), accidentals, dotted notes, triplets, rests, ties
+- Chord degrees under the notes (1, 3, 5, 7 for chord tones; ♭9, 9, ♯9, 11, ♯11, ♭13, 13 for tensions in orange), switchable per lick
 - A text box under each lick for your notes
 - Licks are saved in the browser, and **Sync** keeps them the same on all your devices (via a private GitHub gist). Export / Import makes backup files
 

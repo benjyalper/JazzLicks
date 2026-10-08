@@ -199,3 +199,24 @@ export function transposeMeasures(measures, fromKey, toKey) {
   }
   return apply(order[0]);
 }
+
+// ---------------------------------------------------------------- chord degrees
+
+/**
+ * The note's role in the chord: 1, 3, 5, 7 for chord tones (whatever the
+ * chord quality), otherwise the tension it forms: ♭9, 9, ♯9, 11, ♯11, ♭13, 13.
+ * Returns { label, chordTone }.
+ */
+export function chordDegree(note, chord) {
+  const q = CHORD_QUALITIES.find((c) => c.id === chord.quality) || CHORD_QUALITIES[3];
+  const [third, fifth, seventh] = q.intervals;
+  const semis = (((midi(note) - rootPc(chord.root)) % 12) + 12) % 12;
+  if (semis === 0) return { label: '1', chordTone: true };
+  if (semis === third) return { label: '3', chordTone: true };
+  if (semis === fifth) return { label: '5', chordTone: true };
+  if (semis === seventh) return { label: '7', chordTone: true };
+  const other = {
+    1: '♭9', 2: '9', 3: '♯9', 4: '♮3', 5: '11', 6: '♯11', 7: '♮5', 8: '♭13', 9: '13', 10: '♭7', 11: '♮7',
+  };
+  return { label: other[semis], chordTone: false };
+}
