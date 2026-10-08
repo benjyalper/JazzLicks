@@ -203,20 +203,28 @@ export function transposeMeasures(measures, fromKey, toKey) {
 // ---------------------------------------------------------------- chord degrees
 
 /**
- * The note's role in the chord. Root, 3rd and 5th are 1, 3, 5 whatever the
- * chord quality; sevenths are named by interval: ♭7 (minor 7th above the root)
- * or 7 (major 7th). Other notes are tensions: ♭9, 9, ♯9, 11, ♯11, ♭13, 13.
- * Returns { label, chordTone }.
+ * The note's interval above the chord root: 1, ♭3 / 3, ♭5 / 5, ♭7 / 7 for
+ * chord tones, ♭9, 9, ♯9, 11, ♯11, ♭13, 13 for tensions. A minor 3rd is ♯9 on
+ * a major-type chord and ♭3 on a minor one; a ♭5 is ♯11 unless the chord is
+ * half-diminished. Returns { label, chordTone } (chordTone = in the chord).
  */
 export function chordDegree(note, chord) {
   const q = CHORD_QUALITIES.find((c) => c.id === chord.quality) || CHORD_QUALITIES[3];
-  const [third, fifth, seventh] = q.intervals;
+  const tones = [0, ...q.intervals];
   const semis = (((midi(note) - rootPc(chord.root)) % 12) + 12) % 12;
-  if (semis === 0) return { label: '1', chordTone: true };
-  if (semis === third) return { label: '3', chordTone: true };
-  if (semis === fifth) return { label: '5', chordTone: true };
-  if (semis === 10) return { label: '♭7', chordTone: seventh === 10 };
-  if (semis === 11) return { label: '7', chordTone: seventh === 11 };
-  const other = { 1: '♭9', 2: '9', 3: '♯9', 4: '♮3', 5: '11', 6: '♯11', 7: '♮5', 8: '♭13', 9: '13' };
-  return { label: other[semis], chordTone: false };
+  const labels = {
+    0: '1',
+    1: '♭9',
+    2: '9',
+    3: tones.includes(3) ? '♭3' : '♯9',
+    4: '3',
+    5: '11',
+    6: tones.includes(6) ? '♭5' : '♯11',
+    7: '5',
+    8: '♭13',
+    9: '13',
+    10: '♭7',
+    11: '7',
+  };
+  return { label: labels[semis], chordTone: tones.includes(semis) };
 }
