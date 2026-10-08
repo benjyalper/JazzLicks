@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" fill="#1f1b16"/>
+  <!-- staff lines -->
+  <g stroke="#f6f1e7" stroke-opacity="0.16" stroke-width="7">
+    <path d="M0 196H512M0 248H512M0 300H512M0 352H512M0 404H512"/>
+  </g>
+  <!-- two beamed eighth notes -->
+  <g fill="#f6f1e7">
+    <ellipse cx="172" cy="380" rx="58" ry="42" transform="rotate(-24 172 380)"/>
+    <ellipse cx="338" cy="328" rx="58" ry="42" transform="rotate(-24 338 328)"/>
+    <path d="M216 368 L 224 160 L 244 158 L 238 364 Z"/>
+    <path d="M382 316 L 390 108 L 410 106 L 404 312 Z"/>
+  </g>
+  <path d="M222 140 L 406 88 L 408 140 L 224 192 Z" fill="#e8590c"/>
+</svg>

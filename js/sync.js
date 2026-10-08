@@ -210,6 +210,8 @@ export function notifyChange() {
 
 export async function connect(token) {
   token = token.trim();
+  const fromLink = token.match(/sync=([\w-]+)/);
+  if (fromLink) token = fromLink[1];
   if (!/^[\w-]{20,}$/.test(token)) throw new Error('That doesn\'t look like a GitHub key.');
   setStatus('syncing');
   try {

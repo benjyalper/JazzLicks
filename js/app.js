@@ -1111,7 +1111,7 @@ function refreshSyncDialog() {
     ? h('p', { class: 'modal-error' }, info.detail) : null;
 
   if (!info.on) {
-    const input = h('input', { type: 'password', class: 'token-input', placeholder: 'Paste your key (ghp_…)', autocomplete: 'off', spellcheck: 'false' });
+    const input = h('input', { type: 'password', class: 'token-input', placeholder: 'Paste your key or sync link', autocomplete: 'off', spellcheck: 'false' });
     const connectBtn = h('button', {
       class: 'btn primary',
       onclick: async () => {
