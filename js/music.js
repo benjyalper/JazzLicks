@@ -203,8 +203,9 @@ export function transposeMeasures(measures, fromKey, toKey) {
 // ---------------------------------------------------------------- chord degrees
 
 /**
- * The note's role in the chord: 1, 3, 5, 7 for chord tones (whatever the
- * chord quality), otherwise the tension it forms: ♭9, 9, ♯9, 11, ♯11, ♭13, 13.
+ * The note's role in the chord. Root, 3rd and 5th are 1, 3, 5 whatever the
+ * chord quality; sevenths are named by interval: ♭7 (minor 7th above the root)
+ * or 7 (major 7th). Other notes are tensions: ♭9, 9, ♯9, 11, ♯11, ♭13, 13.
  * Returns { label, chordTone }.
  */
 export function chordDegree(note, chord) {
@@ -214,9 +215,8 @@ export function chordDegree(note, chord) {
   if (semis === 0) return { label: '1', chordTone: true };
   if (semis === third) return { label: '3', chordTone: true };
   if (semis === fifth) return { label: '5', chordTone: true };
-  if (semis === seventh) return { label: '7', chordTone: true };
-  const other = {
-    1: '♭9', 2: '9', 3: '♯9', 4: '♮3', 5: '11', 6: '♯11', 7: '♮5', 8: '♭13', 9: '13', 10: '♭7', 11: '♮7',
-  };
+  if (semis === 10) return { label: '♭7', chordTone: seventh === 10 };
+  if (semis === 11) return { label: '7', chordTone: seventh === 11 };
+  const other = { 1: '♭9', 2: '9', 3: '♯9', 4: '♮3', 5: '11', 6: '♯11', 7: '♮5', 8: '♭13', 9: '13' };
   return { label: other[semis], chordTone: false };
 }
