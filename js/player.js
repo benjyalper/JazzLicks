@@ -248,6 +248,7 @@ export function buildEvents(phrase) {
     // Rhythm section: comping chords, bass line, drums.
     for (const ev of buildBacking(phrase, { bass, drums, comp: chords === 'comp' })) {
       if (ev.kind === 'drum') events.push({ kind: 'drum', time: sec(ev.tick), sound: ev.sound, vel: ev.vel });
+      else if (ev.kind === 'gtr') events.push({ kind: 'gtr', time: sec(ev.tick), dur: span(ev.tick, ev.dur), notes: ev.notes.map(noteName), vel: ev.vel });
       else if (ev.kind === 'bass') events.push({ kind: 'bass', time: sec(ev.tick), dur: span(ev.tick, ev.dur), notes: [noteName(ev.midi)], vel: ev.vel });
       else events.push({ kind: 'chord', time: sec(ev.tick), dur: span(ev.tick, ev.dur), notes: ev.notes.map(noteName), vel: ev.vel });
     }
@@ -264,7 +265,10 @@ export function buildEvents(phrase) {
     for (const ev of countInEvents(phrase)) events.push({ kind: 'drum', time: tickToSeconds(ev.tick, tempo, false), sound: ev.sound, vel: ev.vel });
   }
 
-  return { events, total: sec(total), start: sec(0), needsBass: bass, needsKit: drums || !!phrase.countIn };
+  return {
+    events, total: sec(total), start: sec(0), needsBass: bass, needsKit: drums || !!phrase.countIn,
+    needsGuitar: latin && chords === 'comp',
+  };
 }
 
 class Player {
@@ -293,11 +297,13 @@ class Player {
     let sampler;
     let bass = null;
     let kit = null;
+    let gtr = null;
     try {
-      [sampler, bass, kit] = await Promise.all([
+      [sampler, bass, kit, gtr] = await Promise.all([
         loadInstrument(phrase.instrument),
         built.needsBass ? loadBass().catch(() => null) : null,
         built.needsKit ? loadKit().catch(() => null) : null,
+        built.needsGuitar ? loadInstrument('guitar').catch(() => null) : null,
       ]);
     } catch (e) {
       this.state = 'stopped';
@@ -310,6 +316,7 @@ class Player {
     this.sampler = sampler;
     this.bass = bass;
     this.kit = kit;
+    this.gtr = gtr;
     const def = INSTRUMENTS[phrase.instrument] || INSTRUMENTS.piano;
     const { events, total, start } = built;
     const T = Tone.getTransport();
@@ -321,6 +328,10 @@ class Player {
           sampler.triggerAttackRelease(ev.notes, ev.dur, time, def.melodyVel);
         } else if (ev.kind === 'chord') {
           ev.notes.forEach((nn, k) => sampler.triggerAttackRelease(nn, ev.dur, time + k * def.strum, def.chordVel * ev.vel));
+        } else if (ev.kind === 'gtr') {
+          // Bossa guitar: fingers pluck together (tiny roll), on the nylon guitar.
+          const g = gtr || sampler;
+          ev.notes.forEach((nn, k) => g.triggerAttackRelease(nn, ev.dur, time + k * 0.008, ev.vel));
         } else if (ev.kind === 'bass') {
           if (bass) bass.triggerAttackRelease(ev.notes, ev.dur, time, ev.vel);
         } else if (ev.kind === 'drum') {
@@ -345,6 +356,7 @@ class Player {
   releaseAll() {
     if (this.sampler) this.sampler.releaseAll();
     if (this.bass) this.bass.releaseAll();
+    if (this.gtr) this.gtr.releaseAll();
     if (this.kit) this.kit.stop();
   }
 

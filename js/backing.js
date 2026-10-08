@@ -4,7 +4,7 @@ import { MEASURE_TICKS, BEAT_TICKS, CHORD_QUALITIES, rootPc, chordVoicing } from
 
 export const STYLES = [
   { id: 'swing', label: 'Swing' },
-  { id: 'latin', label: 'Latin' },
+  { id: 'latin', label: 'Bossa' },
 ];
 
 const BASS_LOW = 28; // E1
@@ -90,21 +90,32 @@ function walkingBass(phrase, list) {
   return events;
 }
 
+// Bossa nova bass: the "boom … ba-boom … ba" figure — root on 1 (dotted
+// quarter), fifth on the "and" of 2 tied into 3, and an eighth on the "and"
+// of 4 that already plays the next bar's root.
 function bossaBass(phrase, list) {
   const events = [];
   let prev = 38;
+  const total = phrase.measures.length * MEASURE_TICKS;
+  const hit = (tick, pc, dur, vel) => {
+    const midi = bassNote(pc, prev);
+    events.push({ kind: 'bass', tick, dur, midi, vel });
+    prev = midi;
+  };
   phrase.measures.forEach((_, m) => {
-    for (const half of [0, 1]) {
-      const tick = m * MEASURE_TICKS + half * 48;
-      const ch = chordAt(list, tick);
-      if (!ch) continue;
-      const root = rootPc(ch.root);
-      const changed = half === 0 || list.some((c) => c.tick === tick);
-      // Root on the downbeat, fifth on beat 3 (or the new root if the chord changes).
-      const pc = changed ? root : root + intervals(ch).fifth;
-      const midi = bassNote(pc, changed ? prev : prev - 5);
-      events.push({ kind: 'bass', tick, dur: 36, midi, vel: changed ? 0.85 : 0.7 });
-      prev = midi;
+    const t = m * MEASURE_TICKS;
+    const ch1 = chordAt(list, t);
+    const ch3 = chordAt(list, t + 48);
+    if (ch1) hit(t, rootPc(ch1.root), 34, 0.85);
+    if (ch3) {
+      const changes = ch3 !== ch1;
+      const pc = changes ? rootPc(ch3.root) : rootPc(ch3.root) + intervals(ch3).fifth;
+      hit(t + 36, pc, 10, 0.55);
+      hit(t + 48, pc, 34, 0.8);
+      // Pick-up into the next bar (or loop back to the start).
+      const nextTick = t + MEASURE_TICKS < total ? t + MEASURE_TICKS : phrase.loop ? 0 : -1;
+      const next = nextTick >= 0 ? chordAt(list, nextTick) : null;
+      if (next) hit(t + 84, rootPc(next.root) + (next === ch3 ? intervals(next).fifth : 0), 10, 0.55);
     }
   });
   return events;
@@ -164,13 +175,50 @@ function swingComp(phrase, list) {
   return ev;
 }
 
-function latinComp(phrase, list) {
+// Guitar-style shell voicing for bossa: 3rd, 7th and 9th (♭5 instead of the
+// 9th on half-diminished), placed around G3–E4.
+function bossaVoicing(chord) {
+  const iv = intervals(chord);
+  const pc = rootPc(chord.root);
+  const tones = chord.quality === 'm7b5' ? [iv.third, iv.fifth, iv.seventh] : [iv.third, iv.seventh, 14];
+  const notes = tones.map((t) => {
+    let m = 48 + ((((pc + t) % 12) + 12) % 12); // C3..B3
+    if (m < 55) m += 12; // keep it within G3..F#4
+    return m;
+  });
+  return notes.sort((a, b) => a - b);
+}
+
+// João Gilberto-style nylon guitar: the thumb plays the bass on 1 and 3, the
+// fingers pluck the chord in a syncopated two-bar figure, and a chord change
+// is anticipated on the "and" of 4.
+const BOSSA_FINGERS = [[0, 3, 5], [2, 4, 7]]; // eighth-note positions in bar A / bar B
+
+function bossaGuitar(phrase, list, withBass) {
   const ev = [];
+  const total = phrase.measures.length * MEASURE_TICKS;
   phrase.measures.forEach((_, m) => {
-    for (const e of BOSSA_STICK[m % 2]) {
-      const tick = m * MEASURE_TICKS + e * 12;
-      const ch = chordAt(list, tick);
-      if (ch) ev.push({ kind: 'comp', tick, dur: 16, notes: chordVoicing(ch).slice(1), vel: 0.9 });
+    const t = m * MEASURE_TICKS;
+    // Thumb: root on 1, fifth (or new root) on 3. Softer when the bassist plays too.
+    for (const beat of [0, 2]) {
+      const ch = chordAt(list, t + beat * 24);
+      if (!ch) continue;
+      const changed = beat === 0 || list.some((c) => c.tick === t + 48);
+      const pc = rootPc(ch.root) + (changed ? 0 : intervals(ch).fifth);
+      let midi = 40 + ((((pc - 4) % 12) + 12) % 12); // E2..D#3
+      ev.push({ kind: 'gtr', tick: t + beat * 24, dur: 20, notes: [midi], vel: withBass ? 0.32 : 0.55 });
+    }
+    // Fingers.
+    const pattern = BOSSA_FINGERS[m % 2];
+    for (const e of pattern) {
+      let tick = t + e * 12;
+      let ch = chordAt(list, tick);
+      // The last hit of bar B pushes the next bar's chord (anticipation).
+      if (e === 7) {
+        const nextTick = t + MEASURE_TICKS < total ? t + MEASURE_TICKS : phrase.loop ? 0 : -1;
+        if (nextTick >= 0) ch = chordAt(list, nextTick) || ch;
+      }
+      if (ch) ev.push({ kind: 'gtr', tick, dur: e === 7 ? 18 : 14, notes: bossaVoicing(ch), vel: 0.42 });
     }
   });
   return ev;
@@ -183,7 +231,7 @@ export function buildBacking(phrase, opts) {
   const ev = [];
   if (opts.bass && list.length) ev.push(...(latin ? bossaBass(phrase, list) : walkingBass(phrase, list)));
   if (opts.drums) ev.push(...(latin ? latinDrums(phrase.measures.length) : swingDrums(phrase.measures.length)));
-  if (opts.comp && list.length) ev.push(...(latin ? latinComp(phrase, list) : swingComp(phrase, list)));
+  if (opts.comp && list.length) ev.push(...(latin ? bossaGuitar(phrase, list, opts.bass) : swingComp(phrase, list)));
   return ev;
 }
 
