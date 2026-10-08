@@ -104,6 +104,35 @@ function makeStaveNote(n) {
 const SELECTED = { fillStyle: '#d9480f', strokeStyle: '#d9480f' };
 const PADDED = { fillStyle: '#c4c0b8', strokeStyle: '#c4c0b8' };
 
+// Notes, beams and triplets for one bar, plus the minimum width it needs.
+function buildBar(phrase, measure, m, opts) {
+  const items = measure.notes.map((note, i) => ({ note, i, pad: false }))
+    .concat(padRests(measureTicks(measure)).map((note) => ({ note, i: -1, pad: true })));
+  let tick = 0;
+  const sns = items.map((it) => {
+    const sn = makeStaveNote(it.note);
+    if ((it.pad || it.note.hold) && opts.editing) sn.setStyle(PADDED);
+    if (!it.pad && opts.selected && opts.selected.m === m && opts.selected.i === it.i) sn.setStyle(SELECTED);
+    it.sn = sn;
+    it.tick = tick;
+    tick += it.pad ? padTicks(it.note) : noteTicks(it.note);
+    return sn;
+  });
+  const tuplets = tripletGroups(items).map((g) => new VF.Tuplet(g.items.map((it) => it.sn), {
+    num_notes: 3,
+    notes_occupied: 2,
+    ratioed: false,
+    bracketed: !(g.items.length >= 2 && g.items.every((it) => beamable(it.note))),
+  }));
+  const voice = new VF.Voice({ num_beats: 4, beat_value: 4 }).setMode(VF.Voice.Mode.SOFT);
+  voice.addTickables(sns);
+  VF.Accidental.applyAccidentals([voice], phrase.keySig);
+  const beams = makeBeams(items);
+  // Minimum width from VexFlow, with a little breathing room per note.
+  const minW = new VF.Formatter().joinVoices([voice]).preCalculateMinTotalWidth([voice]) + 8 * items.length + 24;
+  return { items, voice, beams, tuplets, minW: Math.max(70, minW) };
+}
+
 /**
  * Render `phrase` into `host`. Returns a layout object used for hit testing
  * and for highlighting notes during playback.
@@ -111,25 +140,51 @@ const PADDED = { fillStyle: '#c4c0b8', strokeStyle: '#c4c0b8' };
 export function renderPhrase(host, phrase, opts = {}) {
   host.innerHTML = '';
   const pixelWidth = Math.max(240, Math.floor(opts.width || host.clientWidth || 600));
-  // Phones get slightly smaller notation so two bars fit on a line.
-  const scale = pixelWidth < 500 ? 0.8 : 1;
-  const width = pixelWidth / scale;
   const n = phrase.measures.length;
-  const perLine = Math.max(1, Math.min(n, 4, Math.floor(width / 185)));
-  const lineCount = Math.ceil(n / perLine);
+
+  // 1. Build every bar's notes first and ask VexFlow how much room each one
+  //    needs, so busy bars get more width than sparse ones.
+  const bars = phrase.measures.map((measure, m) => buildBar(phrase, measure, m, opts));
+  const probeFirst = new VF.Stave(0, 0, 300).addClef('treble').addKeySignature(phrase.keySig).addTimeSignature('4/4');
+  const probeLine = new VF.Stave(0, 0, 300).addClef('treble').addKeySignature(phrase.keySig);
+  const modFirst = probeFirst.getNoteStartX() - probeFirst.getX();
+  const modLine = probeLine.getNoteStartX() - probeLine.getX();
+
+  // 2. Scale: phones get smaller notation, and shrink further if even a single
+  //    bar wouldn't fit on a line.
+  let scale = pixelWidth < 500 ? 0.8 : 1;
+  const widest = Math.max(...bars.map((b) => b.minW)) + modFirst + 2 * MARGIN;
+  if (widest > pixelWidth / scale) scale = Math.max(0.6, pixelWidth / widest);
+  const width = pixelWidth / scale;
+  const avail = width - 2 * MARGIN;
+
+  // 3. Break into lines: as many bars as fit (max 4), each bar at least its minimum width.
+  const lines = [];
+  let cur = [];
+  let used = 0;
+  bars.forEach((b, m) => {
+    const mod = lines.length === 0 ? modFirst : modLine;
+    if (cur.length && (cur.length >= 4 || mod + used + b.minW > avail)) {
+      lines.push(cur);
+      cur = [];
+      used = 0;
+    }
+    cur.push(m);
+    used += b.minW;
+  });
+  if (cur.length) lines.push(cur);
+  const lineCount = lines.length;
 
   // Lines with very high notes get extra room so they don't hit the chord row.
-  const lineExtra = [];
-  for (let L = 0; L < lineCount; L++) {
+  const lineExtra = lines.map((ms) => {
     let maxD = -Infinity;
-    for (const ms of phrase.measures.slice(L * perLine, (L + 1) * perLine)) {
-      for (const nt of ms.notes) if (!nt.rest) maxD = Math.max(maxD, diatonicIndex(nt.step, nt.oct));
+    for (const m of ms) {
+      for (const nt of phrase.measures[m].notes) if (!nt.rest) maxD = Math.max(maxD, diatonicIndex(nt.step, nt.oct));
     }
     const headTop = (F5 - maxD) * 5 - 5; // relative to the top staff line
     const limit = CHORD_BASELINE - TOP_LINE_OFFSET + 12;
-    const extra = maxD === -Infinity ? 0 : Math.max(0, Math.ceil(limit - headTop));
-    lineExtra.push(extra);
-  }
+    return maxD === -Infinity ? 0 : Math.max(0, Math.ceil(limit - headTop));
+  });
 
   const renderer = new VF.Renderer(host, VF.Renderer.Backends.SVG);
   renderer.resize(pixelWidth, lineCount * LINE_H * scale);
@@ -137,30 +192,28 @@ export function renderPhrase(host, phrase, opts = {}) {
   ctx.scale(scale, scale);
   const svg = host.querySelector('svg');
 
-  const layout = { svg, width, scale, offsetY: 0, perLine, measures: [], notes: [], chords: [] };
+  const layout = { svg, width, scale, offsetY: 0, measures: [], notes: [], chords: [] };
   const real = []; // real (non-pad) notes in order, for ties
   const chords = chordList(phrase);
   let cursor = 0;
 
-  for (let L = 0; L < lineCount; L++) {
+  lines.forEach((ms, L) => {
     const bandTop = cursor; // top of this system (chord row)
     const lineTop = bandTop + lineExtra[L]; // stave y
     const bandBottom = lineTop + LINE_H;
     const group = ctx.openGroup('system');
     const lineMeasures = [];
-    const first = L * perLine;
-    const count = Math.min(perLine, n - first);
-
-    const probe = new VF.Stave(0, lineTop, 300, { space_above_staff_ln: SPACE_ABOVE });
-    probe.addClef('treble').addKeySignature(phrase.keySig);
-    if (L === 0) probe.addTimeSignature('4/4');
-    const modW = probe.getNoteStartX() - probe.getX();
-    const noteSpace = (width - 2 * MARGIN - modW) / perLine;
+    const mod = L === 0 ? modFirst : modLine;
+    const need = ms.reduce((sum, m) => sum + bars[m].minW, 0);
+    // Share the spare room in proportion to each bar's needs. A short last
+    // line isn't stretched all the way across.
+    const isShortLast = lineCount > 1 && L === lineCount - 1 && need < (avail - mod) * 0.6;
+    const room = isShortLast ? need * 1.4 : avail - mod;
 
     let x = MARGIN;
-    for (let k = 0; k < count; k++) {
-      const m = first + k;
-      const w = noteSpace + (k === 0 ? modW : 0);
+    ms.forEach((m, k) => {
+      const bar = bars[m];
+      const w = room * (bar.minW / need) + (k === 0 ? mod : 0);
       const stave = new VF.Stave(x, lineTop, w, { space_above_staff_ln: SPACE_ABOVE });
       if (k === 0) {
         stave.addClef('treble').addKeySignature(phrase.keySig);
@@ -169,39 +222,12 @@ export function renderPhrase(host, phrase, opts = {}) {
       if (m === n - 1) stave.setEndBarType(VF.Barline.type.END);
       stave.setContext(ctx).draw();
 
-      const measure = phrase.measures[m];
-      const items = measure.notes.map((note, i) => ({ note, i, pad: false }))
-        .concat(padRests(measureTicks(measure)).map((note) => ({ note, i: -1, pad: true })));
+      new VF.Formatter().joinVoices([bar.voice]).formatToStave([bar.voice], stave);
+      bar.voice.draw(ctx, stave);
+      bar.beams.forEach((b) => b.setContext(ctx).draw());
+      bar.tuplets.forEach((t) => t.setContext(ctx).draw());
 
-      let tick = 0;
-      const sns = items.map((it) => {
-        const sn = makeStaveNote(it.note);
-        if ((it.pad || it.note.hold) && opts.editing) sn.setStyle(PADDED);
-        if (!it.pad && opts.selected && opts.selected.m === m && opts.selected.i === it.i) {
-          sn.setStyle(SELECTED);
-        }
-        it.sn = sn;
-        it.tick = tick;
-        tick += it.pad ? padTicks(it.note) : noteTicks(it.note);
-        return sn;
-      });
-
-      const tuplets = tripletGroups(items).map((g) => new VF.Tuplet(g.items.map((it) => it.sn), {
-        num_notes: 3,
-        notes_occupied: 2,
-        ratioed: false,
-        bracketed: !(g.items.length >= 2 && g.items.every((it) => beamable(it.note))),
-      }));
-      const voice = new VF.Voice({ num_beats: 4, beat_value: 4 }).setMode(VF.Voice.Mode.SOFT);
-      voice.addTickables(sns);
-      VF.Accidental.applyAccidentals([voice], phrase.keySig);
-      const beams = makeBeams(items);
-      new VF.Formatter().joinVoices([voice]).formatToStave([voice], stave);
-      voice.draw(ctx, stave);
-      beams.forEach((b) => b.setContext(ctx).draw());
-      tuplets.forEach((t) => t.setContext(ctx).draw());
-
-      for (const it of items) {
+      for (const it of bar.items) {
         const info = {
           m, i: it.i, pad: it.pad, tick: it.tick, line: L, sn: it.sn, note: it.note,
           x: it.sn.getAbsoluteX() + it.sn.getGlyphWidth() / 2,
@@ -215,11 +241,11 @@ export function renderPhrase(host, phrase, opts = {}) {
         x0: stave.getX(), x1: stave.getX() + stave.getWidth(),
         noteStart: stave.getNoteStartX(), noteEnd: stave.getNoteEndX(),
         topLine: stave.getYForLine(0),
-        items,
+        items: bar.items,
       });
       lineMeasures.push(layout.measures[layout.measures.length - 1]);
       x += w;
-    }
+    });
     if (opts.degrees) drawDegrees(group, lineMeasures, real, chords);
     ctx.closeGroup();
     // Start the next system below whatever this one actually drew (long stems, beams…).
@@ -230,7 +256,7 @@ export function renderPhrase(host, phrase, opts = {}) {
     } catch (e) { /* ignore */ }
     for (const ml of lineMeasures) ml.bandBottom = bottom;
     cursor = bottom;
-  }
+  });
   const totalH = cursor;
 
   drawTies(ctx, real);
