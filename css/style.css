@@ -75,8 +75,40 @@ button:disabled { cursor: default; opacity: 0.35; }
   margin: 0 auto;
   padding: 16px 16px 0;
   display: flex;
-  gap: 6px;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
 }
+.tab-buttons { display: flex; gap: 6px; flex-wrap: wrap; }
+.search {
+  margin-left: auto;
+  width: 200px;
+  max-width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--card);
+  padding: 7px 14px;
+}
+.search:focus { outline: none; border-color: var(--ink-soft); }
+
+.group-head { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+.group-toggle {
+  border: none;
+  background: none;
+  font: 700 19px 'Kalam', cursive;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 2px;
+  color: var(--ink);
+}
+.group-caret { font-family: 'DM Sans', sans-serif; font-size: 14px; color: var(--ink-soft); width: 12px; }
+.group-add {
+  width: 30px; height: 30px; border-radius: 50%;
+  border: 1px solid var(--line); background: var(--card); font-size: 18px; line-height: 1; color: var(--ink-soft);
+}
+.group-add:hover { border-color: var(--ink-soft); color: var(--ink); }
+.group-choices { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0; }
 .tab {
   border: 1px solid var(--line);
   background: var(--card);
@@ -445,6 +477,7 @@ button:disabled { cursor: default; opacity: 0.35; }
   .sync-btn { padding: 6px 9px; }
   .licks { padding: 14px 10px 8px; }
   .tabs { padding: 12px 10px 0; }
+  .search { width: 100%; margin-left: 0; }
   .tab { padding: 6px 11px; font-size: 14px; }
   .lick { padding: 12px 10px 14px; }
   .settings { padding-left: 0; }

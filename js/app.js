@@ -298,22 +298,79 @@ const DUR_NAMES = { '16': 'Sixteenth', '8': 'Eighth', q: 'Quarter', h: 'Half', w
 
 // ---------------------------------------------------------------- building cards
 
+let searchQuery = '';
+const COLLAPSED_KEY = 'jazzlicks.collapsed';
+let collapsed = new Set();
+try { collapsed = new Set(JSON.parse(localStorage.getItem(COLLAPSED_KEY)) || []); } catch (e) { /* ignore */ }
+
+function toggleGroup(key) {
+  if (collapsed.has(key)) collapsed.delete(key);
+  else collapsed.add(key);
+  try { localStorage.setItem(COLLAPSED_KEY, JSON.stringify([...collapsed])); } catch (e) { /* ignore */ }
+  renderAll();
+}
+
+const matches = (p, q) => !q || `${p.title || ''} ${p.text || ''} ${p.group || ''}`.toLowerCase().includes(q);
+
 function renderAll() {
   const list = $('#licks');
   list.innerHTML = '';
   cards.clear();
   renderTabs();
   document.body.classList.toggle('is-editing', !!state.editingId);
-  const visible = state.phrases.filter((p) => categoryOf(p) === activeTab);
+  const q = searchQuery.trim().toLowerCase();
+  const inTab = state.phrases.filter((p) => categoryOf(p) === activeTab);
+  const visible = inTab.filter((p) => matches(p, q));
+  const cat = CATEGORIES.find((c) => c.id === activeTab);
   if (!visible.length) {
-    const cat = CATEGORIES.find((c) => c.id === activeTab);
-    list.append(h('div', { class: 'empty' },
-      h('p', {}, cat.empty),
-      h('button', { class: 'btn primary', onclick: addPhrase }, `+ ${cat.newTitle}`)));
+    list.append(q
+      ? h('div', { class: 'empty' }, h('p', {}, `Nothing matches “${searchQuery.trim()}”.`))
+      : h('div', { class: 'empty' },
+        h('p', {}, cat.empty),
+        h('button', { class: 'btn primary', onclick: () => addPhrase() }, `+ ${cat.newTitle}`)));
     return;
   }
-  for (const p of visible) list.append(buildCard(p));
+  // Pieces without a group first, then each group under its own header.
+  for (const p of visible.filter((x) => !x.group)) list.append(buildCard(p));
+  const groups = [...new Set(visible.filter((x) => x.group).map((x) => x.group))];
+  for (const g of groups) {
+    const key = `${activeTab}:${g}`;
+    const members = visible.filter((x) => x.group === g);
+    const isOpen = q || !collapsed.has(key);
+    list.append(h('div', { class: 'group-head' },
+      h('button', { class: 'group-toggle', 'aria-expanded': isOpen ? 'true' : 'false', onclick: () => toggleGroup(key), dir: 'auto' },
+        h('span', { class: 'group-caret' }, isOpen ? '▾' : '▸'), g, h('span', { class: 'tab-count' }, String(members.length))),
+      h('button', { class: 'group-add', title: `New ${cat.newTitle.replace('New ', '')} in “${g}”`, 'aria-label': `Add to ${g}`, onclick: () => addPhrase(g) }, '+')));
+    if (isOpen) for (const p of members) list.append(buildCard(p));
+  }
   drawAllStaves();
+}
+
+// Group dialog: pick an existing group of this tab, type a new one, or none.
+function openGroupDialog(id) {
+  const p = byId(id);
+  if (!p) return;
+  const existing = [...new Set(state.phrases.filter((x) => categoryOf(x) === categoryOf(p) && x.group).map((x) => x.group))];
+  const back = h('div', { class: 'modal-backdrop', onclick: (e) => { if (e.target === back) back.remove(); } });
+  const setGroup = (g) => {
+    p.group = g || undefined;
+    if (!g) delete p.group;
+    save();
+    back.remove();
+    renderAll();
+    toast(g ? `Added to “${g}”.` : 'Removed from its group.');
+  };
+  const input = h('input', { class: 'token-input', placeholder: 'New group name, e.g. Dorian', dir: 'auto', maxlength: 60 });
+  input.addEventListener('keydown', (e) => { if (e.key === 'Enter' && input.value.trim()) setGroup(input.value.trim()); });
+  back.append(h('div', { class: 'modal', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Group' },
+    h('button', { class: 'modal-close', 'aria-label': 'Close', onclick: () => back.remove() }, '×'),
+    h('h2', {}, 'Group'),
+    h('p', { dir: 'auto' }, `Put “${p.title}” in a group:`),
+    existing.length ? h('div', { class: 'group-choices' }, existing.map((g) => h('button', { class: 'btn' + (p.group === g ? ' primary' : ''), dir: 'auto', onclick: () => setGroup(g) }, g))) : null,
+    h('div', { class: 'token-row' }, input, h('button', { class: 'btn primary', onclick: () => input.value.trim() && setGroup(input.value.trim()) }, 'Add')),
+    p.group ? h('div', { class: 'modal-actions' }, h('button', { class: 'btn danger-btn', onclick: () => setGroup(null) }, 'Remove from group')) : null));
+  document.body.append(back);
+  if (!existing.length) input.focus();
 }
 
 function rebuildCard(id) {
@@ -351,6 +408,7 @@ function buildCard(p) {
     h('summary', { 'aria-label': 'More actions', title: 'More' }, '⋯'),
     h('div', { class: 'menu-items' },
       h('button', { onclick: () => duplicatePhrase(p.id) }, 'Duplicate'),
+      h('button', { onclick: () => openGroupDialog(p.id) }, p.group ? `Group: ${p.group}…` : 'Group…'),
       h('button', { onclick: () => movePhrase(p.id, -1) }, 'Move up'),
       h('button', { onclick: () => movePhrase(p.id, 1) }, 'Move down'),
       ...CATEGORIES.filter((c) => c.id !== categoryOf(p)).map((c) => h('button', { onclick: () => moveToCategory(p.id, c.id) }, `Move to ${c.label}`)),
@@ -1330,8 +1388,10 @@ function setEditing(id) {
   }
 }
 
-function addPhrase() {
+function addPhrase(group) {
   const p = newPhrase(activeTab);
+  if (typeof group === 'string') p.group = group;
+  if (searchQuery) { searchQuery = ''; $('#search').value = ''; }
   state.phrases.unshift(p);
   save();
   state.editingId = p.id;
@@ -1637,7 +1697,13 @@ document.addEventListener('keydown', (e) => {
 function boot() {
   backupOnce();
   load();
-  $('#new-lick').addEventListener('click', addPhrase);
+  $('#new-lick').addEventListener('click', () => addPhrase());
+  const search = $('#search');
+  let searchTimer = null;
+  search.addEventListener('input', () => {
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(() => { searchQuery = search.value; renderAll(); }, 150);
+  });
   const headerMenu = $('#header-menu');
   const closeHeaderMenu = () => headerMenu.removeAttribute('open');
   $('#export').addEventListener('click', () => { closeHeaderMenu(); exportLicks(); });
