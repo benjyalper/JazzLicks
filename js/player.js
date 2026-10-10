@@ -20,11 +20,14 @@ const INSTRUMENTS = {
     melodyVel: 0.8,
     chordVel: 0.38,
     strum: 0,
+    lead: 0,
   },
   guitar: {
-    // Classical nylon-string guitar
+    // Classical nylon-string guitar. The library's "D5" file is mislabeled (it
+    // sounds E♭5), so it's left out and D5 is built from C♯5 / E5 instead.
     baseUrl: 'https://nbrosowsky.github.io/tonejs-instruments/samples/guitar-nylon/',
-    urls: sampleUrls(['E2', 'Fs2', 'A2', 'Cs3', 'D3', 'E3', 'Fs3', 'G3', 'A3', 'Cs4', 'Ds4', 'E4', 'Fs4', 'A4', 'Cs5', 'D5', 'E5', 'Fs5', 'A5']),
+    urls: sampleUrls(['E2', 'Fs2', 'A2', 'Cs3', 'D3', 'E3', 'Fs3', 'G3', 'A3', 'Cs4', 'Ds4', 'E4', 'Fs4', 'A4', 'Cs5', 'E5', 'Fs5', 'A5']),
+    lead: 0.014, // these recordings start ~14 ms later than the piano's
     release: 1,
     melodyVel: 0.95,
     chordVel: 0.55,
@@ -324,14 +327,17 @@ class Player {
     T.position = 0;
     for (const ev of events) {
       T.schedule((time) => {
+        // Start slightly early for instruments whose recordings begin late.
+        const t0 = Math.max(Tone.now(), time - def.lead);
         if (ev.kind === 'melody') {
-          sampler.triggerAttackRelease(ev.notes, ev.dur, time, def.melodyVel);
+          sampler.triggerAttackRelease(ev.notes, ev.dur, t0, def.melodyVel);
         } else if (ev.kind === 'chord') {
-          ev.notes.forEach((nn, k) => sampler.triggerAttackRelease(nn, ev.dur, time + k * def.strum, def.chordVel * ev.vel));
+          ev.notes.forEach((nn, k) => sampler.triggerAttackRelease(nn, ev.dur, t0 + k * def.strum, def.chordVel * ev.vel));
         } else if (ev.kind === 'gtr') {
           // Bossa guitar: fingers pluck together (tiny roll), on the nylon guitar.
           const g = gtr || sampler;
-          ev.notes.forEach((nn, k) => g.triggerAttackRelease(nn, ev.dur, time + k * 0.008, ev.vel));
+          const tg = Math.max(Tone.now(), time - INSTRUMENTS.guitar.lead);
+          ev.notes.forEach((nn, k) => g.triggerAttackRelease(nn, ev.dur, tg + k * 0.008, ev.vel));
         } else if (ev.kind === 'bass') {
           if (bass) bass.triggerAttackRelease(ev.notes, ev.dur, time, ev.vel);
         } else if (ev.kind === 'drum') {
