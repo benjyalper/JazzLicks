@@ -356,7 +356,7 @@ class Player {
     for (const ev of events) {
       T.schedule((time) => {
         // Start slightly early for instruments whose recordings begin late.
-        const t0 = Math.max(Tone.now(), time - def.lead);
+        const t0 = Math.max(Tone.getContext().currentTime, time - def.lead);
         if (ev.kind === 'melody') {
           sampler.triggerAttackRelease(ev.notes, ev.dur, t0, def.melodyVel);
         } else if (ev.kind === 'chord') {
@@ -364,7 +364,7 @@ class Player {
         } else if (ev.kind === 'gtr') {
           // Bossa guitar: fingers pluck together (tiny roll), on the nylon guitar.
           const g = gtr || sampler;
-          const tg = Math.max(Tone.now(), time - INSTRUMENTS.guitar.lead);
+          const tg = Math.max(Tone.getContext().currentTime, time - INSTRUMENTS.guitar.lead);
           ev.notes.forEach((nn, k) => g.triggerAttackRelease(nn, ev.dur, tg + k * 0.008, ev.vel));
         } else if (ev.kind === 'bass') {
           if (bass) bass.triggerAttackRelease(ev.notes, ev.dur, time, ev.vel);
