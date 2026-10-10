@@ -29,12 +29,88 @@ const emptyMeasure = () => ({ chords: [null, null], notes: [] });
 const N = (step, alter, oct, dur = '8', extra = {}) => ({ rest: false, step, alter, oct, dur, dots: 0, tie: false, ...extra });
 const R = (dur = '8') => ({ rest: true, dur, dots: 0, tie: false });
 
-function newPhrase() {
+function newPhrase(category = 'licks') {
   return {
-    id: uid(), title: 'New lick', keySig: 'C', tempo: 160, instrument: 'piano',
+    id: uid(), title: CATEGORIES.find((c) => c.id === category).newTitle, category,
+    keySig: 'C', tempo: 160, instrument: 'piano',
     style: 'swing', chords: 'comp', bass: true, drums: true, countIn: false, loop: false,
+    degrees: category !== 'minus1',
     measures: [emptyMeasure(), emptyMeasure()], text: '',
   };
+}
+
+// ---------------------------------------------------------------- tabs
+
+const CATEGORIES = [
+  { id: 'licks', label: 'Licks', newTitle: 'New lick', empty: 'No licks yet.' },
+  { id: 'scales', label: 'Scales', newTitle: 'New scale', empty: 'No scales yet.' },
+  { id: 'minus1', label: 'Minus 1', newTitle: 'New track', empty: 'No Minus 1 tracks yet (chords only, no notes).' },
+];
+const TAB_KEY = 'jazzlicks.tab';
+const HEBREW = /[\u0590-\u05FF]/;
+
+const hasNotes = (p) => (p.measures || []).some((m) => m.notes.some((n) => !n.rest));
+
+// Which tab a piece belongs to. Pieces moved by hand keep their tab; older
+// pieces are sorted automatically (nothing is changed or removed by this).
+function categoryOf(p) {
+  if (p.category && CATEGORIES.some((c) => c.id === p.category)) return p.category;
+  if (!hasNotes(p)) return 'minus1';
+  if (p.id === 'example-hawkins' || HEBREW.test(p.title || '')) return 'licks';
+  return 'scales';
+}
+
+let activeTab = 'licks';
+try {
+  const saved = localStorage.getItem(TAB_KEY);
+  if (CATEGORIES.some((c) => c.id === saved)) activeTab = saved;
+} catch (e) { /* ignore */ }
+
+function setTab(id) {
+  activeTab = id;
+  try { localStorage.setItem(TAB_KEY, id); } catch (e) { /* ignore */ }
+  if (state.editingId && categoryOf(byId(state.editingId) || {}) !== id) {
+    state.editingId = null;
+    state.sel = null;
+  }
+  closeChordPicker();
+  renderAll();
+  window.scrollTo({ top: 0 });
+}
+
+function renderTabs() {
+  const bar = $('#tabs');
+  bar.innerHTML = '';
+  for (const c of CATEGORIES) {
+    const count = state.phrases.filter((p) => categoryOf(p) === c.id).length;
+    bar.append(h('button', {
+      class: 'tab' + (activeTab === c.id ? ' on' : ''), role: 'tab', 'aria-selected': activeTab === c.id ? 'true' : 'false',
+      onclick: () => setTab(c.id),
+    }, c.label, h('span', { class: 'tab-count' }, String(count))));
+  }
+  const cat = CATEGORIES.find((c) => c.id === activeTab);
+  $('#new-lick').innerHTML = `+ New<span class="long"> ${cat.newTitle.replace('New ', '')}</span>`;
+}
+
+function moveToCategory(id, category) {
+  const p = byId(id);
+  if (!p) return;
+  p.category = category;
+  if (state.editingId === id) { state.editingId = null; state.sel = null; }
+  save();
+  renderAll();
+  toast(`Moved “${p.title}” to ${CATEGORIES.find((c) => c.id === category).label}.`);
+}
+
+// One-time safety copy of everything before the tabs version first runs.
+function backupOnce() {
+  try {
+    const key = 'jazzlicks.backup.before-tabs';
+    if (!localStorage.getItem(key)) {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (raw) localStorage.setItem(key, raw);
+    }
+  } catch (e) { /* ignore */ }
 }
 
 // Transcribed from the Coleman Hawkins "Desafinado" example.
@@ -223,19 +299,23 @@ function renderAll() {
   const list = $('#licks');
   list.innerHTML = '';
   cards.clear();
-  if (!state.phrases.length) {
+  renderTabs();
+  const visible = state.phrases.filter((p) => categoryOf(p) === activeTab);
+  if (!visible.length) {
+    const cat = CATEGORIES.find((c) => c.id === activeTab);
     list.append(h('div', { class: 'empty' },
-      h('p', {}, 'No licks yet.'),
-      h('button', { class: 'btn primary', onclick: addPhrase }, '+ New lick')));
+      h('p', {}, cat.empty),
+      h('button', { class: 'btn primary', onclick: addPhrase }, `+ ${cat.newTitle}`)));
     return;
   }
-  for (const p of state.phrases) list.append(buildCard(p));
+  for (const p of visible) list.append(buildCard(p));
   drawAllStaves();
 }
 
 function rebuildCard(id) {
   const old = cards.get(id);
   const p = byId(id);
+  if (p && !old && categoryOf(p) !== activeTab) return; // not on this tab
   if (!old || !p) return renderAll();
   const card = buildCard(p);
   old.el.replaceWith(card);
@@ -254,7 +334,7 @@ function buildCard(p) {
   setPlayIcon(playBtn, playing);
 
   const title = h('input', {
-    class: 'title', value: p.title, 'aria-label': 'Lick name', maxlength: 80,
+    class: 'title', value: p.title, 'aria-label': 'Name', maxlength: 80, dir: 'auto',
     oninput: (e) => { p.title = e.target.value; save(); },
   });
 
@@ -269,6 +349,7 @@ function buildCard(p) {
       h('button', { onclick: () => duplicatePhrase(p.id) }, 'Duplicate'),
       h('button', { onclick: () => movePhrase(p.id, -1) }, 'Move up'),
       h('button', { onclick: () => movePhrase(p.id, 1) }, 'Move down'),
+      ...CATEGORIES.filter((c) => c.id !== categoryOf(p)).map((c) => h('button', { onclick: () => moveToCategory(p.id, c.id) }, `Move to ${c.label}`)),
       h('button', { class: 'danger', onclick: () => deletePhrase(p.id) }, 'Delete')));
 
   const keySel = h('select', {
@@ -336,7 +417,7 @@ function buildCard(p) {
 
   const host = h('div', { class: 'stave-host' + (isEditing ? ' editing' : '') });
   const notes = h('textarea', {
-    class: 'notes', rows: 2, placeholder: 'Words about this lick: where it\'s from, how to use it…',
+    class: 'notes', rows: 2, dir: 'auto', placeholder: 'Words about this lick: where it\'s from, how to use it…',
     oninput: (e) => { p.text = e.target.value; save(); autoGrow(e.target); },
   });
   notes.value = p.text || '';
@@ -893,7 +974,7 @@ function setEditing(id) {
 }
 
 function addPhrase() {
-  const p = newPhrase();
+  const p = newPhrase(activeTab);
   state.phrases.unshift(p);
   save();
   state.editingId = p.id;
@@ -917,8 +998,11 @@ function duplicatePhrase(id) {
 
 function movePhrase(id, dir) {
   const i = state.phrases.findIndex((p) => p.id === id);
-  const j = i + dir;
-  if (i < 0 || j < 0 || j >= state.phrases.length) return;
+  if (i < 0) return;
+  const cat = categoryOf(state.phrases[i]);
+  let j = i + dir;
+  while (j >= 0 && j < state.phrases.length && categoryOf(state.phrases[j]) !== cat) j += dir;
+  if (j < 0 || j >= state.phrases.length) return;
   [state.phrases[i], state.phrases[j]] = [state.phrases[j], state.phrases[i]];
   save();
   renderAll();
@@ -1180,6 +1264,7 @@ document.addEventListener('keydown', (e) => {
 // ---------------------------------------------------------------- boot
 
 function boot() {
+  backupOnce();
   load();
   $('#new-lick').addEventListener('click', addPhrase);
   const headerMenu = $('#header-menu');

@@ -16,6 +16,10 @@ Write short jazz phrases (1–6 bars) on a treble staff, add chord symbols, and 
 - A text box under each lick for your notes
 - Licks are saved in the browser, and **Sync** keeps them the same on all your devices (via a private GitHub gist). Export / Import makes backup files
 
+## Tabs
+
+Pieces are grouped into **Licks**, **Scales** and **Minus 1** (chords only, for playing along). Older pieces are sorted automatically (no notes → Minus 1, Hebrew name → Licks, otherwise Scales); use **⋯ → Move to** to put anything elsewhere.
+
 ## Editing
 
 Press **Edit** on a lick (or double-click the staff).
