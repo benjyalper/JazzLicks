@@ -90,32 +90,31 @@ function walkingBass(phrase, list) {
   return events;
 }
 
-// Bossa nova bass: the "boom … ba-boom … ba" figure — root on 1 (dotted
-// quarter), fifth on the "and" of 2 tied into 3, and an eighth on the "and"
-// of 4 that already plays the next bar's root.
+// Bossa nova bass: the chord's root on beat 1, its fifth (above or below,
+// whichever is closer) on beat 3. If the chord changes on beat 3, the new root.
 function bossaBass(phrase, list) {
   const events = [];
   let prev = 38;
-  const total = phrase.measures.length * MEASURE_TICKS;
-  const hit = (tick, pc, dur, vel) => {
-    const midi = bassNote(pc, prev);
-    events.push({ kind: 'bass', tick, dur, midi, vel });
-    prev = midi;
-  };
   phrase.measures.forEach((_, m) => {
     const t = m * MEASURE_TICKS;
     const ch1 = chordAt(list, t);
     const ch3 = chordAt(list, t + 48);
-    if (ch1) hit(t, rootPc(ch1.root), 34, 0.85);
+    if (ch1) {
+      const midi = bassNote(rootPc(ch1.root), prev);
+      events.push({ kind: 'bass', tick: t, dur: 44, midi, vel: 0.85 });
+      prev = midi;
+    }
     if (ch3) {
       const changes = ch3 !== ch1;
-      const pc = changes ? rootPc(ch3.root) : rootPc(ch3.root) + intervals(ch3).fifth;
-      hit(t + 36, pc, 10, 0.55);
-      hit(t + 48, pc, 34, 0.8);
-      // Pick-up into the next bar (or loop back to the start).
-      const nextTick = t + MEASURE_TICKS < total ? t + MEASURE_TICKS : phrase.loop ? 0 : -1;
-      const next = nextTick >= 0 ? chordAt(list, nextTick) : null;
-      if (next) hit(t + 84, rootPc(next.root) + (next === ch3 ? intervals(next).fifth : 0), 10, 0.55);
+      const root = changes ? bassNote(rootPc(ch3.root), prev) : prev;
+      let midi = root;
+      if (!changes) {
+        const up = root + 7;
+        const down = root - 5;
+        midi = down < BASS_LOW ? up : up > BASS_HIGH ? down : Math.abs(up - prev) < Math.abs(down - prev) ? up : down;
+      }
+      events.push({ kind: 'bass', tick: t + 48, dur: 44, midi, vel: changes ? 0.85 : 0.75 });
+      prev = midi;
     }
   });
   return events;
@@ -142,20 +141,16 @@ function swingDrums(measures) {
   return ev;
 }
 
-// Bossa nova: straight eighths on the shaker, cross-stick in a 2-bar clave
-// figure, kick "boom-ba boom-ba".
-const BOSSA_STICK = [[0, 3, 6], [2, 5]]; // eighth-note positions in bar A / bar B
+// Bossa nova percussion: shaker in sixteenths (the first of each group of four
+// slightly stronger) and a wooden clave on sixteenths 1, 5, 7, 10 and 13.
+const BOSSA_CLAVE = [0, 4, 6, 9, 12]; // sixteenth-note positions (0-based) in every bar
 
 function latinDrums(measures) {
   const ev = [];
   for (let m = 0; m < measures; m++) {
     const t = m * MEASURE_TICKS;
-    for (let e = 0; e < 8; e++) ev.push({ kind: 'drum', sound: 'shaker', tick: t + e * 12, vel: e % 2 ? 0.35 : 0.55 });
-    for (const e of BOSSA_STICK[m % 2]) ev.push({ kind: 'drum', sound: 'stick', tick: t + e * 12, vel: 0.7 });
-    ev.push({ kind: 'drum', sound: 'kick', tick: t, vel: 0.6 });
-    ev.push({ kind: 'drum', sound: 'kick', tick: t + 36, vel: 0.35 });
-    ev.push({ kind: 'drum', sound: 'kick', tick: t + 48, vel: 0.6 });
-    ev.push({ kind: 'drum', sound: 'kick', tick: t + 84, vel: 0.35 });
+    for (let s16 = 0; s16 < 16; s16++) ev.push({ kind: 'drum', sound: 'shaker', tick: t + s16 * 6, vel: s16 % 4 === 0 ? 0.62 : 0.5 });
+    for (const s16 of BOSSA_CLAVE) ev.push({ kind: 'drum', sound: 'clave', tick: t + s16 * 6, vel: 0.8 });
   }
   return ev;
 }
@@ -236,6 +231,6 @@ export function buildBacking(phrase, opts) {
 }
 
 export function countInEvents(phrase) {
-  const sound = phrase.style === 'latin' ? 'stick' : 'hihat';
+  const sound = phrase.style === 'latin' ? 'clave' : 'hihat';
   return [0, 1, 2, 3].map((b) => ({ kind: 'drum', sound, tick: b * BEAT_TICKS, vel: b === 0 ? 0.9 : 0.7 }));
 }

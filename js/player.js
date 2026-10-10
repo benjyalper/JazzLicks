@@ -81,6 +81,29 @@ function loadKit() {
         envelope: { attack: 0.001, decay: 0.07, sustain: 0, release: 0.04 },
         volume: -12,
       }).connect(out);
+      // Wooden clave: warm tone with a soft overtone and a tiny attack click.
+      const claveTone = new Tone.Synth({
+        oscillator: { type: 'sine' },
+        envelope: { attack: 0.001, decay: 0.085, sustain: 0, release: 0.04 },
+        volume: -6,
+      }).connect(out);
+      const claveWood = new Tone.Synth({
+        oscillator: { type: 'sine' },
+        envelope: { attack: 0.001, decay: 0.03, sustain: 0, release: 0.02 },
+        volume: -20,
+      }).connect(out);
+      const claveClick = new Tone.NoiseSynth({
+        noise: { type: 'pink' },
+        envelope: { attack: 0.0005, decay: 0.004, sustain: 0, release: 0.002 },
+        volume: -24,
+      }).connect(out);
+      // Shaker: a short filtered "sh".
+      const shakerFilter = new Tone.Filter({ frequency: 6500, type: 'bandpass', Q: 0.8 }).connect(out);
+      const shaker = new Tone.NoiseSynth({
+        noise: { type: 'white' },
+        envelope: { attack: 0.006, decay: 0.05, sustain: 0, release: 0.02 },
+        volume: -14,
+      }).connect(shakerFilter);
       const samples = new Tone.Sampler({
         urls: { C1: 'acoustic-kit/kick.mp3', D1: 'acoustic-kit/snare.mp3', 'F#1': 'acoustic-kit/hihat.mp3', A1: '../berklee/shaker_1.mp3' },
         baseUrl: 'https://tonejs.github.io/audio/drum-samples/',
@@ -89,6 +112,11 @@ function loadKit() {
           play(sound, time, vel) {
             if (sound === 'ride') ride.triggerAttackRelease(320, 0.9, time, vel);
             else if (sound === 'stick') stick.triggerAttackRelease('A5', 0.05, time, vel);
+            else if (sound === 'clave') {
+              claveTone.triggerAttackRelease(1650, 0.06, time, vel);
+              claveWood.triggerAttackRelease(4300, 0.02, time, vel);
+              claveClick.triggerAttackRelease(0.004, time, vel);
+            } else if (sound === 'shaker') shaker.triggerAttackRelease(0.03, time, vel);
             else samples.triggerAttackRelease({ kick: 'C1', snare: 'D1', hihat: 'F#1', shaker: 'A1' }[sound], 0.6, time, vel);
           },
           stop() { samples.releaseAll(); },
