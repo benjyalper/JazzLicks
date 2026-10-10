@@ -380,6 +380,13 @@ function rebuildCard(id) {
   if (!old || !p) return renderAll();
   const card = buildCard(p);
   old.el.replaceWith(card);
+  // Keep a "12 keys" transposition and its badge while playback continues.
+  const ref = cards.get(id);
+  if (ref && player.currentId === id && old.override) ref.override = old.override;
+  if (ref && player.currentId === id && !old.passBadge.hidden) {
+    ref.passBadge.hidden = false;
+    ref.passBadge.textContent = old.passBadge.textContent;
+  }
   drawStave(id);
 }
 
@@ -611,7 +618,7 @@ function drawStave(id) {
   if (!ref || !p) return;
   const isEditing = state.editingId === id;
   try {
-    ref.layout = renderPhrase(ref.host, (!isEditing && ref.override) || p, {
+    ref.layout = renderPhrase(ref.host, ref.override || p, {
       width: ref.host.clientWidth,
       editing: isEditing,
       degrees: p.degrees !== false,
@@ -675,7 +682,7 @@ function attachStaveEvents(p, host) {
     if (!hit) return;
     if (e.pointerType === 'mouse') e.preventDefault();
     const note = hit.type === 'note' ? p.measures[hit.m].notes[hit.i] : null;
-    const drag = note && !note.rest && isSelectedNote(hit.m, hit.i) && !e.shiftKey;
+    const drag = note && !note.rest && isSelectedNote(hit.m, hit.i) && !e.shiftKey && !ref.override;
     gesture = { id: e.pointerId, x0: e.clientX, y0: e.clientY, t0: Date.now(), hit, drag, dragged: false, snap: false, shift: e.shiftKey };
     if (drag) host.setPointerCapture(e.pointerId);
   });
@@ -724,6 +731,8 @@ const isSelectedNote = (m, i) => !!state.sel && state.sel.m === m && state.sel.i
 
 // What a tap on the staff does.
 function tapStaff(p, hit, e, shift) {
+  const ref = cards.get(p.id);
+  if (ref && ref.override) return toast('Showing another key while practising. Stop playback to edit.');
   if (hit.type === 'chord') return openChordPicker(p, hit.m, hit.slot, e.clientX, e.clientY);
   if (hit.type === 'note') {
     const note = p.measures[hit.m].notes[hit.i];
@@ -1470,7 +1479,7 @@ function hooksFor(id) {
       ref.passBadge.textContent = ps.label;
       // In "12 keys", show the notation in the key being played.
       const p = byId(id);
-      if (p && p.practice === 'keys' && state.editingId !== id) {
+      if (p && p.practice === 'keys') {
         ref.override = ps.k === 0 ? null : ps.phrase;
         drawStave(id);
       }
