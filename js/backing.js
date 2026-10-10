@@ -142,8 +142,8 @@ function swingDrums(measures) {
 }
 
 // Bossa nova percussion: shaker in sixteenths (the first of each group of four
-// slightly stronger) and a wooden clave on sixteenths 1, 5, 7, 10 and 13.
-const BOSSA_CLAVE = [0, 4, 6, 9, 12]; // sixteenth-note positions (0-based) in every bar
+// slightly stronger) and a wooden clave on sixteenths 1, 4, 7, 10 and 13.
+const BOSSA_CLAVE = [0, 3, 6, 9, 12]; // sixteenth-note positions (0-based) in every bar
 
 function latinDrums(measures) {
   const ev = [];

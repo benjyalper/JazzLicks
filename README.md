@@ -9,7 +9,7 @@ Write short jazz phrases (1–6 bars) on a treble staff, add chord symbols, and 
 - Treble-clef notation in a hand-written jazz style (VexFlow + Petaluma font)
 - Chord symbols above the staff: all 12 roots × maj7, m7, m7♭5 (ø), 7. Up to two per bar (beats 1 and 3)
 - Play / pause per lick, with piano or classical guitar, tempo, count-in and loop
-- Rhythm section generated from the chords: **Swing** (walking bass, ride cymbal, hi-hat on 2 & 4) or **Bossa** (João Gilberto-style nylon guitar comping; bass on root (beat 1) and fifth (beat 3); shaker in 16ths; wooden clave on 16ths 1, 5, 7, 10, 13). Bass and drums can each be switched off
+- Rhythm section generated from the chords: **Swing** (walking bass, ride cymbal, hi-hat on 2 & 4) or **Bossa** (João Gilberto-style nylon guitar comping; bass on root (beat 1) and fifth (beat 3); shaker in 16ths; wooden clave on 16ths 1, 4, 7, 10, 13). Bass and drums can each be switched off
 - Chords can be **Held** (sustained), **Comping** (rhythmic, in the style) or **Off**
 - Key signatures (changing the key transposes all notes and chords), accidentals, dotted notes, triplets, rests, ties
 - Chord degrees under the notes (intervals above the root: 1, ♭3 / 3, ♭5 / 5, ♭7 / 7 for chord tones; ♭9, 9, ♯9, 11, ♯11, ♭13, 13 for tensions in orange), switchable per lick
