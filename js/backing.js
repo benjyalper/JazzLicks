@@ -184,37 +184,31 @@ function bossaVoicing(chord) {
   return notes.sort((a, b) => a - b);
 }
 
-// João Gilberto-style nylon guitar: the thumb plays the bass on 1 and 3, the
-// fingers pluck the chord in a syncopated two-bar figure, and a chord change
-// is anticipated on the "and" of 4.
-const BOSSA_FINGERS = [[0, 3, 5], [2, 4, 7]]; // eighth-note positions in bar A / bar B
+// Bossa comping (on the lick's piano or guitar): the chord sounds on
+// sixteenths 2, 5, 9 and 12 of every bar. When the bass is switched off, a
+// thumb bass note on beats 1 and 3 keeps the root underneath.
+const BOSSA_COMP = [1, 4, 8, 11]; // sixteenth-note positions (0-based) in every bar
 
 function bossaGuitar(phrase, list, withBass) {
   const ev = [];
-  const total = phrase.measures.length * MEASURE_TICKS;
   phrase.measures.forEach((_, m) => {
     const t = m * MEASURE_TICKS;
-    // Thumb: root on 1, fifth (or new root) on 3. Softer when the bassist plays too.
-    for (const beat of [0, 2]) {
-      const ch = chordAt(list, t + beat * 24);
-      if (!ch) continue;
-      const changed = beat === 0 || list.some((c) => c.tick === t + 48);
-      const pc = rootPc(ch.root) + (changed ? 0 : intervals(ch).fifth);
-      let midi = 40 + ((((pc - 4) % 12) + 12) % 12); // E2..D#3
-      ev.push({ kind: 'gtr', tick: t + beat * 24, dur: 20, notes: [midi], vel: withBass ? 0.32 : 0.55 });
-    }
-    // Fingers.
-    const pattern = BOSSA_FINGERS[m % 2];
-    for (const e of pattern) {
-      let tick = t + e * 12;
-      let ch = chordAt(list, tick);
-      // The last hit of bar B pushes the next bar's chord (anticipation).
-      if (e === 7) {
-        const nextTick = t + MEASURE_TICKS < total ? t + MEASURE_TICKS : phrase.loop ? 0 : -1;
-        if (nextTick >= 0) ch = chordAt(list, nextTick) || ch;
+    if (!withBass) {
+      for (const beat of [0, 2]) {
+        const ch = chordAt(list, t + beat * 24);
+        if (!ch) continue;
+        const changed = beat === 0 || list.some((c) => c.tick === t + 48);
+        const pc = rootPc(ch.root) + (changed ? 0 : intervals(ch).fifth);
+        const midi = 40 + ((((pc - 4) % 12) + 12) % 12); // E2..D#3
+        ev.push({ kind: 'gtr', tick: t + beat * 24, dur: 20, notes: [midi], vel: 0.55 });
       }
-      if (ch) ev.push({ kind: 'gtr', tick, dur: e === 7 ? 18 : 14, notes: bossaVoicing(ch), vel: 0.42 });
     }
+    BOSSA_COMP.forEach((s16, k) => {
+      const tick = t + s16 * 6;
+      const ch = chordAt(list, tick);
+      const next = k + 1 < BOSSA_COMP.length ? BOSSA_COMP[k + 1] * 6 : MEASURE_TICKS;
+      if (ch) ev.push({ kind: 'gtr', tick, dur: Math.min(next - s16 * 6, 16), notes: bossaVoicing(ch), vel: 0.42 });
+    });
   });
   return ev;
 }

@@ -298,7 +298,7 @@ export function buildEvents(phrase) {
 
   return {
     events, total: sec(total), start: sec(0), needsBass: bass, needsKit: drums || !!phrase.countIn,
-    needsGuitar: latin && chords === 'comp',
+    needsGuitar: false,
   };
 }
 
@@ -362,10 +362,10 @@ class Player {
         } else if (ev.kind === 'chord') {
           ev.notes.forEach((nn, k) => sampler.triggerAttackRelease(nn, ev.dur, t0 + k * def.strum, def.chordVel * ev.vel));
         } else if (ev.kind === 'gtr') {
-          // Bossa guitar: fingers pluck together (tiny roll), on the nylon guitar.
-          const g = gtr || sampler;
-          const tg = Math.max(Tone.getContext().currentTime, time - INSTRUMENTS.guitar.lead);
-          ev.notes.forEach((nn, k) => g.triggerAttackRelease(nn, ev.dur, tg + k * 0.008, ev.vel));
+          // Bossa comping on the lick's instrument (guitar plucks with a tiny roll).
+          const roll = phrase.instrument === 'guitar' ? 0.008 : 0;
+          const vel = phrase.instrument === 'guitar' ? ev.vel : ev.vel * 0.8;
+          ev.notes.forEach((nn, k) => sampler.triggerAttackRelease(nn, ev.dur, t0 + k * roll, vel));
         } else if (ev.kind === 'bass') {
           if (bass) bass.triggerAttackRelease(ev.notes, ev.dur, time, ev.vel);
         } else if (ev.kind === 'drum') {
