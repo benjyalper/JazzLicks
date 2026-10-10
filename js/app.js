@@ -448,6 +448,9 @@ function buildCard(p) {
   const style = seg('Style', STYLES.map((st) => [st.id, st.label]),
     () => p.style || 'swing', (v) => { p.style = v; });
 
+  const practiceSeg = seg('Practice', [['off', 'Normal'], ['keys', '12 keys'], ['speed', `Speed up`]],
+    () => p.practice || 'off', (v) => { p.practice = v; });
+
   const chordsSeg = seg('Chords', [['held', 'Held'], ['comp', 'Comping'], ['off', 'Off']],
     () => p.chords || 'comp', (v) => { p.chords = v; });
 
@@ -468,7 +471,9 @@ function buildCard(p) {
       h('span', { class: 'checks-label' }, 'Band'),
       check('Bass', 'bass', true),
       check('Drums', 'drums', true)),
+    h('div', { class: 'field' }, h('span', {}, 'Practice'), practiceSeg),
     h('div', { class: 'checks' },
+      check('Melody', 'melody', true),
       check('Count-in', 'countIn'),
       check('Loop', 'loop'),
       h('label', { class: 'check' },
@@ -485,8 +490,9 @@ function buildCard(p) {
   notes.value = p.text || '';
   requestAnimationFrame(() => autoGrow(notes));
 
+  const passBadge = h('span', { class: 'pass-badge', hidden: true });
   const card = h('article', { class: 'lick' + (isEditing ? ' is-editing' : ''), 'data-id': p.id },
-    h('header', { class: 'lick-head' }, playBtn, title, editBtn, menu),
+    h('header', { class: 'lick-head' }, playBtn, title, passBadge, editBtn, menu),
     settings,
     isEditing ? buildToolbar(p) : null,
     host,
@@ -496,7 +502,7 @@ function buildCard(p) {
   if (isEditing) attachStaveEvents(p, host);
   else host.addEventListener('dblclick', () => setEditing(p.id));
 
-  Object.assign(ref, { el: card, host, playBtn, layout: null });
+  Object.assign(ref, { el: card, host, playBtn, passBadge, layout: null, override: null });
   cards.set(p.id, ref);
   return card;
 }
@@ -605,7 +611,7 @@ function drawStave(id) {
   if (!ref || !p) return;
   const isEditing = state.editingId === id;
   try {
-    ref.layout = renderPhrase(ref.host, p, {
+    ref.layout = renderPhrase(ref.host, (!isEditing && ref.override) || p, {
       width: ref.host.clientWidth,
       editing: isEditing,
       degrees: p.degrees !== false,
@@ -1450,7 +1456,24 @@ function hooksFor(id) {
   return {
     onState: (st) => {
       const ref = cards.get(id);
-      if (ref) setPlayIcon(ref.playBtn, st);
+      if (!ref) return;
+      setPlayIcon(ref.playBtn, st);
+      if (st === 'stopped' && (ref.override || !ref.passBadge.hidden)) {
+        ref.passBadge.hidden = true;
+        if (ref.override) { ref.override = null; drawStave(id); }
+      }
+    },
+    onPass: (ps) => {
+      const ref = cards.get(id);
+      if (!ref) return;
+      ref.passBadge.hidden = false;
+      ref.passBadge.textContent = ps.label;
+      // In "12 keys", show the notation in the key being played.
+      const p = byId(id);
+      if (p && p.practice === 'keys' && state.editingId !== id) {
+        ref.override = ps.k === 0 ? null : ps.phrase;
+        drawStave(id);
+      }
     },
     onNote: (m, i) => {
       if (lastPlayingEl) lastPlayingEl.classList.remove('playing');

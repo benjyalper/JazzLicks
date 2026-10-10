@@ -1,6 +1,6 @@
 // Playback with Tone.js: sampled piano or guitar for melody and chords, plus an
 // optional rhythm section (upright bass + drums) in swing or latin style.
-import { MEASURE_TICKS, BEAT_TICKS, noteTicks, midi, chordVoicing } from './music.js';
+import { MEASURE_TICKS, BEAT_TICKS, noteTicks, midi, chordVoicing, transposeMeasures, KEY_SIGS } from './music.js';
 import { buildBacking, chordList, countInEvents } from './backing.js';
 
 function sampleUrls(names) {
@@ -266,6 +266,10 @@ export function buildEvents(phrase) {
     }
     // A tie at the very end of the phrase lets the note ring a little longer.
     const last = flat.length && end === flat[flat.length - 1].end && flat[flat.length - 1].note.tie;
+    if (phrase.melody === false) {
+      events.push({ kind: 'mark', time: melSec(f.start), m: f.m, i: f.i });
+      continue;
+    }
     events.push({
       kind: 'melody', time: melSec(f.start), dur: Math.max(0.05, melSec(end) - melSec(f.start)) + (last ? 0.6 : 0),
       notes: [noteName(midi(f.note))], m: f.m, i: f.i,
@@ -302,6 +306,39 @@ export function buildEvents(phrase) {
   };
 }
 
+// ---------------------------------------------------------------- practice
+
+// Keys around the circle of fourths.
+const CIRCLE = ['C', 'F', 'Bb', 'Eb', 'Ab', 'Db', 'Gb', 'B', 'E', 'A', 'D', 'G'];
+export const SPEED_STEP = 4; // bpm added each time round in "Speed up"
+
+/**
+ * The versions of a phrase played one after another: the phrase itself, or
+ * all 12 keys (circle of fourths), or rising tempos.
+ */
+export function practicePasses(phrase) {
+  const mode = phrase.practice || 'off';
+  if (mode === 'keys') {
+    const start = Math.max(0, CIRCLE.indexOf(phrase.keySig));
+    return CIRCLE.map((_, i) => {
+      const key = CIRCLE[(start + i) % 12];
+      const label = (KEY_SIGS.find((k) => k.key === key) || { label: key }).label.split(' / ')[0];
+      if (i === 0) return { phrase, label };
+      return { phrase: { ...phrase, keySig: key, measures: transposeMeasures(phrase.measures, phrase.keySig, key) }, label };
+    });
+  }
+  if (mode === 'speed') {
+    const out = [];
+    for (let i = 0; i < 12; i++) {
+      const tempo = Math.min(360, (phrase.tempo || 160) + SPEED_STEP * i);
+      out.push({ phrase: { ...phrase, tempo }, label: `${tempo} bpm` });
+      if (tempo >= 360) break;
+    }
+    return out;
+  }
+  return [{ phrase, label: null }];
+}
+
 class Player {
   constructor() {
     this.currentId = null;
@@ -324,7 +361,24 @@ class Player {
     this.hooks = hooks;
     this.state = 'loading';
     hooks.onState('loading');
-    const built = buildEvents(phrase);
+    // Build every pass (one, or 12 keys / rising tempos) back to back.
+    const passes = practicePasses(phrase);
+    const events = [];
+    const passStarts = [];
+    let offset = 0;
+    let needsBass = false;
+    let needsKit = false;
+    passes.forEach((pass, k) => {
+      const b = buildEvents({ ...pass.phrase, countIn: k === 0 && pass.phrase.countIn });
+      for (const ev of b.events) events.push({ ...ev, time: ev.time + offset });
+      passStarts.push({ time: offset + b.start, k, label: pass.label, phrase: pass.phrase });
+      offset += b.total;
+      needsBass = needsBass || b.needsBass;
+      needsKit = needsKit || b.needsKit;
+    });
+    const built = { needsBass, needsKit, needsGuitar: false };
+    const total = offset;
+    const start = passStarts[0].time;
     let sampler;
     let bass = null;
     let kit = null;
@@ -349,7 +403,6 @@ class Player {
     this.kit = kit;
     this.gtr = gtr;
     const def = INSTRUMENTS[phrase.instrument] || INSTRUMENTS.piano;
-    const { events, total, start } = built;
     const T = Tone.getTransport();
     T.cancel(0);
     T.position = 0;
@@ -374,7 +427,12 @@ class Player {
         if (ev.m !== undefined) Tone.getDraw().schedule(() => this.hooks && this.hooks.onNote(ev.m, ev.i), time);
       }, ev.time);
     }
-    if (phrase.loop) {
+    if (passes.length > 1) {
+      for (const ps of passStarts) {
+        T.schedule((time) => Tone.getDraw().schedule(() => this.hooks && this.hooks.onPass && this.hooks.onPass(ps), time), Math.max(0, ps.time - 0.05));
+      }
+    }
+    if (phrase.loop || passes.length > 1) {
       T.loop = true;
       T.loopStart = start; // the count-in plays only once
       T.loopEnd = total;

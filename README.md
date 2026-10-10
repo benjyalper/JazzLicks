@@ -13,6 +13,8 @@ Write short jazz phrases (1–6 bars) on a treble staff, add chord symbols, and 
 - Chords can be **Held** (sustained), **Comping** (rhythmic, in the style) or **Off**
 - Key signatures (changing the key transposes all notes and chords), accidentals, dotted notes, triplets, rests, ties
 - Chord degrees under the notes (intervals above the root: 1, ♭3 / 3, ♭5 / 5, ♭7 / 7 for chord tones; ♭9, 9, ♯9, 11, ♯11, ♭13, 13 for tensions in orange), switchable per lick
+- Practice: **12 keys** (the lick moves round the circle of fourths each time, and the notation follows), **Speed up** (+4 bpm each time round), and a **Melody** switch to play along with just the band
+- Groups inside each tab (collapsible, with a + to add to the group) and search
 - A text box under each lick for your notes
 - Licks are saved in the browser, and **Sync** keeps them the same on all your devices (via a private GitHub gist). Export / Import makes backup files
 
