@@ -1248,10 +1248,10 @@ function refreshSyncDialog() {
     h('h2', {}, 'Sync is on'),
     h('p', {}, `Connected to GitHub as `, h('b', {}, info.login || '?'), `. Last synced: ${timeAgo(info.lastSync)}.`),
     error,
-    h('h3', {}, 'Add your phone or another computer'),
-    h('p', {}, 'Send yourself this link (WhatsApp, email…) and open it on the other device. It turns sync on there automatically.'),
+    h('h3', {}, 'Add another device, or share with a friend'),
+    h('p', {}, 'Open this link on your other device, or send it to a friend. Everyone who opens it shares this collection: you all see, add and edit the same licks.'),
     h('div', { class: 'link-row' }, copyBtn, shareBtn),
-    h('p', { class: 'muted' }, 'The link contains your key, so only send it to yourself.'),
+    h('p', { class: 'muted' }, 'The link contains your GitHub key, so only share it with people you trust. You can cancel it any time by deleting the key on GitHub.'),
     h('div', { class: 'modal-actions' },
       h('button', { class: 'btn danger-btn', onclick: () => { disconnect(); toast('Sync turned off on this device. Your licks stay here.'); refreshSyncDialog(); } }, 'Turn off on this device'),
       h('button', { class: 'btn primary', onclick: () => syncNow().then(refreshSyncDialog) }, 'Sync now')));
