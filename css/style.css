@@ -256,7 +256,9 @@ button:disabled { cursor: default; opacity: 0.35; }
   border: 1px solid var(--line);
   border-radius: 12px;
 }
+.tb-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; width: 100%; }
 .tb-group { display: flex; align-items: center; gap: 2px; }
+.seg-small button { padding: 4px 10px; font-size: 13px; }
 .tb-group + .tb-group { padding-left: 10px; border-left: 1px solid var(--line); }
 .tb {
   min-width: 36px;
@@ -280,7 +282,7 @@ button:disabled { cursor: default; opacity: 0.35; }
 .del-icon { width: 20px; height: 20px; }
 .tb-label { font-size: 13px; color: var(--ink-soft); padding: 0 4px; }
 .tb-count { min-width: 18px; text-align: center; font-weight: 700; }
-.tb-status { margin-left: auto; padding: 0 8px; font-weight: 700; color: var(--accent); min-width: 40px; text-align: right; }
+.tb-status { margin-left: auto; white-space: nowrap; padding: 0 8px; font-weight: 700; color: var(--accent); min-width: 40px; text-align: right; }
 
 .hint { margin: 2px 0 0; font-size: 12.5px; color: var(--ink-soft); }
 
@@ -412,6 +414,27 @@ button:disabled { cursor: default; opacity: 0.35; }
 .toast.show { opacity: 1; transform: translate(-50%, 0); }
 
 @media (max-width: 600px) {
+  body.is-editing .licks { padding-bottom: 190px; }
+  body.is-editing .toolbar {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    top: auto;
+    z-index: 30;
+    margin: 0;
+    border-radius: 14px 14px 0 0;
+    border-width: 1px 0 0;
+    padding: 6px 8px calc(8px + env(safe-area-inset-bottom));
+    box-shadow: 0 -6px 24px rgba(31, 27, 22, 0.12);
+    gap: 4px;
+  }
+  body.is-editing .tb-row { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; gap: 8px; }
+  body.is-editing .tb-row::-webkit-scrollbar { display: none; }
+  body.is-editing .tb { min-width: 38px; height: 38px; flex: none; }
+  body.is-editing .tb.wide { padding: 0 9px; }
+  body.is-editing .tb-group { flex: none; }
+
   .topbar { padding: 10px 12px; padding-top: calc(10px + env(safe-area-inset-top)); }
   .brand h1 { font-size: 19px; }
   .btn { padding: 6px 11px; }

@@ -119,7 +119,7 @@ function buildBar(phrase, measure, m, opts) {
   const sns = items.map((it) => {
     const sn = makeStaveNote(it.note);
     if ((it.pad || it.note.hold) && opts.editing) sn.setStyle(PADDED);
-    if (!it.pad && opts.selected && opts.selected.m === m && opts.selected.i === it.i) sn.setStyle(SELECTED);
+    if (!it.pad && opts.selected && opts.selected.has(`${m}:${it.i}`)) sn.setStyle(SELECTED);
     it.sn = sn;
     it.tick = tick;
     tick += it.pad ? padTicks(it.note) : noteTicks(it.note);
@@ -159,7 +159,11 @@ export function renderPhrase(host, phrase, opts = {}) {
 
   // 2. Scale: phones get smaller notation, and shrink further if even a single
   //    bar wouldn't fit on a line.
-  let scale = pixelWidth < 500 ? 0.8 : 1;
+  // Phones: smaller notation to fit two bars a line, but bigger (one bar a
+  // line) while editing so notes are easy to hit with a finger.
+  const narrow = pixelWidth < 500;
+  let scale = narrow ? (opts.editing ? 1 : 0.8) : 1;
+  const maxPerLine = narrow && opts.editing ? 1 : 4;
   const widest = Math.max(...bars.map((b) => b.minW)) + modFirst + 2 * MARGIN;
   if (widest > pixelWidth / scale) scale = Math.max(0.6, pixelWidth / widest);
   const width = pixelWidth / scale;
@@ -171,7 +175,7 @@ export function renderPhrase(host, phrase, opts = {}) {
   let used = 0;
   bars.forEach((b, m) => {
     const mod = lines.length === 0 ? modFirst : modLine;
-    if (cur.length && (cur.length >= 4 || mod + used + b.minW > avail)) {
+    if (cur.length && (cur.length >= maxPerLine || mod + used + b.minW > avail)) {
       lines.push(cur);
       cur = [];
       used = 0;
@@ -433,9 +437,32 @@ export function hitTest(layout, x, y) {
   }
   // Clicking a triplet placeholder means "put a note here".
   if (best && best.nt.note.hold) return { type: 'staff', m: ml.m, insertIndex: best.nt.i, diatonic };
-  if (best) return { type: 'note', m: ml.m, i: best.nt.i, diatonic };
+  if (best) return { type: 'note', m: ml.m, i: best.nt.i, diatonic, tick: best.nt.tick };
   const insertIndex = inMeasure.filter((nt) => nt.x < x).length;
-  return { type: 'staff', m: ml.m, insertIndex, diatonic };
+  // Over the empty part of a bar: report the beat position that was tapped.
+  // The empty part of a bar is drawn as rests; work out the beat position
+  // from where the tap falls between the rests' positions.
+  let padTick;
+  const all = layout.notes.filter((nt) => nt.m === ml.m);
+  let k = -1;
+  for (let j = 0; j < all.length; j++) if (all[j].x - 12 <= x) k = j;
+  if (k < 0 && all.length && all[0].pad) padTick = 0;
+  if (k >= 0 && all[k].pad) {
+    const cur = all[k];
+    const next = all[k + 1];
+    const x0 = cur.x - 12;
+    const x1 = next ? next.x - 12 : ml.noteEnd;
+    const t1 = next ? next.tick : MEASURE_TICKS;
+    const frac = Math.max(0, Math.min(1, (x - x0) / Math.max(1, x1 - x0)));
+    padTick = cur.tick + frac * (t1 - cur.tick);
+  }
+  return { type: 'staff', m: ml.m, insertIndex, diatonic, padTick };
+}
+
+/** Staff position (diatonic step) under a y coordinate in a given bar. */
+export function diatonicUnder(layout, m, y) {
+  const ml = layout.measures.find((x) => x.m === m);
+  return ml ? diatonicAt(ml, y) : null;
 }
 
 /** Where to draw the hover "ghost" note head. */

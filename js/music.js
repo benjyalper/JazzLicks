@@ -228,3 +228,17 @@ export function chordDegree(note, chord) {
   };
   return { label: labels[semis], chordTone: tones.includes(semis) };
 }
+
+// Spell a MIDI pitch as a note: naturals where possible, otherwise sharps or
+// flats (flats in flat keys).
+export function spellMidi(m, preferFlats) {
+  const pc = ((m % 12) + 12) % 12;
+  const oct = Math.floor(m / 12) - 1;
+  const naturals = { 0: 'C', 2: 'D', 4: 'E', 5: 'F', 7: 'G', 9: 'A', 11: 'B' };
+  if (naturals[pc]) return { step: naturals[pc], alter: 0, oct };
+  if (preferFlats) {
+    const up = naturals[(pc + 1) % 12];
+    return { step: up, alter: -1, oct: pc === 11 ? oct + 1 : oct };
+  }
+  return { step: naturals[pc - 1], alter: 1, oct };
+}

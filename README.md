@@ -22,19 +22,26 @@ Pieces are grouped into **Licks**, **Scales** and **Minus 1** (chords only, for 
 
 ## Editing
 
+When a bar is full, inserting a note pushes the following notes on into the next bar (up to 6 bars). On phones the editing toolbar sits at the bottom of the screen, and scrolling never adds notes.
+
+
 Press **Edit** on a lick (or double-click the staff).
 
 | Action | Mouse / touch | Keyboard |
 | --- | --- | --- |
-| Add a note | Click the staff | `A`–`G` |
+| Add a note | Click/tap the staff (an empty spot puts it on that beat) | `A`–`G` |
 | Select a note | Click it | `←` `→` |
-| Change pitch | Click the selected note at a new height, or ▲▼ | `↑` `↓` (Shift = octave) |
+| Change pitch | Drag the selected note up/down, or ▲▼ | `↑` `↓` (Shift = octave) |
 | Note length | Toolbar | `1` 16th · `2` 8th · `3` quarter · `4` half · `5` whole |
 | Dot / triplet / rest / tie | Toolbar | `.` / `/` / `R` / `T` |
 | Sharp / flat / natural | Toolbar | `+` / `-` / `N` |
 | Delete | 🗑 | `Backspace` |
 | Chord | Click above the staff | — |
 | Play / pause | ▶ | `Space` |
+| Select a range | Select button then the last note, or Bar | Shift+click, Shift+←→, `Ctrl+A` |
+| Copy / paste / duplicate | Copy, Paste, Duplicate | `Ctrl+C` / `Ctrl+V` / `Ctrl+D` |
+| Octave / semitone (selection) | 8va ▲▼, ½ ▲▼ | Shift+↑↓ / ↑↓ |
+| Overwrite instead of insert | Replace | — |
 | Undo | ↶ | `Ctrl+Z` |
 
 ## Running locally

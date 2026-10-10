@@ -1,9 +1,9 @@
 import {
   KEY_SIGS, DURATIONS, TRIPLET_DURATIONS, DUR_TICKS, MEASURE_TICKS, transposeMeasures, CHORD_QUALITIES, CHORD_ROOTS,
   keyAlter, isFlatKey, fromDiatonic, diatonicIndex, MIN_DIATONIC, MAX_DIATONIC,
-  noteTicks, measureTicks, midi, prettyRoot, pitchLabel, STEPS,
+  noteTicks, measureTicks, midi, prettyRoot, pitchLabel, STEPS, spellMidi,
 } from './music.js';
-import { renderPhrase, hitTest, ghostAt, noteElement } from './render.js';
+import { renderPhrase, hitTest, ghostAt, noteElement, diatonicUnder } from './render.js';
 import { player, previewNote, warmUp } from './player.js';
 import { STYLES } from './backing.js';
 import { initSync, notifyChange, connect, disconnect, syncNow, syncInfo } from './sync.js';
@@ -16,7 +16,10 @@ const MAX_MEASURES = 6;
 const state = {
   phrases: [],
   editingId: null,
-  sel: null, // { m, i } in the phrase being edited
+  sel: null, // { m, i } in the phrase being edited (the cursor / range start)
+  selEnd: null, // { m, i } other end of a selected range, or null
+  rangeMode: false, // phone: next tapped note extends the selection
+  replace: false, // Replace mode: tapping overwrites instead of inserting
   tool: { dur: '8', dots: 0, trip: false },
   undo: [], // [{ id, json }]
   deleted: {}, // id -> time deleted (so deletions sync to other devices)
@@ -300,6 +303,7 @@ function renderAll() {
   list.innerHTML = '';
   cards.clear();
   renderTabs();
+  document.body.classList.toggle('is-editing', !!state.editingId);
   const visible = state.phrases.filter((p) => categoryOf(p) === activeTab);
   if (!visible.length) {
     const cat = CATEGORIES.find((c) => c.id === activeTab);
@@ -447,8 +451,8 @@ function autoGrow(t) {
 function hintText() {
   const touch = matchMedia('(pointer: coarse)').matches;
   return touch
-    ? 'Tap the staff to add a note, tap a note to select it, tap above the staff to add a chord.'
-    : 'Click the staff to add a note · click above it for a chord · keys: A–G notes, ↑↓ pitch, 1–5 length, . dot, / triplet, R rest, T tie, ⌫ delete, Space play.';
+    ? 'Tap the staff to add a note (tap an empty spot to put it on that beat), tap a note to select it, drag a selected note up/down to change its pitch, tap above the staff for a chord.'
+    : 'Click the staff to add a note · click above it for a chord · Shift+click to select a range · keys: A–G notes, ↑↓ pitch, Shift+↑↓ octave, 1–5 length, . dot, / triplet, R rest, T tie, ⌫ delete, Ctrl+C/V/D copy/paste/duplicate, Space play.';
 }
 
 function buildToolbar(p) {
@@ -481,22 +485,49 @@ function buildToolbar(p) {
     onclick: toggleTie, html: '<svg viewBox="0 0 24 14" class="tie-icon" aria-hidden="true"><path d="M2 4c5 8 15 8 20 0" fill="none" stroke="currentColor" stroke-width="2"/></svg>',
   });
 
+  const range = state.selEnd ? selectedRange().length : 0;
+  const hasSel = !!sel;
+  const status = range ? `${range} notes` : sel ? (sel.rest ? 'Rest' : pitchLabel(sel)) : '';
+  const row = (cls, ...groups) => h('div', { class: `tb-row ${cls}` }, ...groups);
+
+  const upBtn = h('button', { class: 'tb', title: range ? 'Up a semitone (↑)' : 'Pitch up (↑)', disabled: !sel || (!range && sel.rest), onclick: () => movePitch(1) }, '▲');
+  const downBtn = h('button', { class: 'tb', title: range ? 'Down a semitone (↓)' : 'Pitch down (↓)', disabled: !sel || (!range && sel.rest), onclick: () => movePitch(-1) }, '▼');
+  const delBtn = h('button', { class: 'tb danger', title: 'Delete (Backspace)', disabled: !hasSel, onclick: deleteSelected, html: '<svg viewBox="0 0 24 24" aria-hidden="true" class="del-icon"><path d="M9 4h6M5 7h14M7 7l1 13h8l1-13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>' });
+  const undoBtn = h('button', { class: 'tb', title: 'Undo (Ctrl+Z)', disabled: !state.undo.length, onclick: undo }, '↶');
+  const wide = (label, title, onclick, disabled = false, on = false) => h('button', { class: 'tb wide' + (on ? ' on' : ''), title, disabled, onclick }, label);
+
   tb.append(
-    group(...durBtns, dotBtn, tripBtn, restBtn),
-    group(accBtn(-1, '♭', 'Flat (-)'), accBtn(0, '♮', 'Natural (N)'), accBtn(1, '♯', 'Sharp (+)'), tieBtn),
-    group(
-      h('button', { class: 'tb', title: 'Pitch up (↑)', disabled: !sel || sel.rest, onclick: () => movePitch(1) }, '▲'),
-      h('button', { class: 'tb', title: 'Pitch down (↓)', disabled: !sel || sel.rest, onclick: () => movePitch(-1) }, '▼'),
-      h('button', { class: 'tb', title: 'Previous note (←)', onclick: () => moveSel(-1) }, '◀'),
-      h('button', { class: 'tb', title: 'Next note (→)', onclick: () => moveSel(1) }, '▶'),
-      h('button', { class: 'tb danger', title: 'Delete note (Backspace)', disabled: !sel, onclick: deleteSelected, html: '<svg viewBox="0 0 24 24" aria-hidden="true" class="del-icon"><path d="M9 4h6M5 7h14M7 7l1 13h8l1-13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>' })),
-    group(
-      h('span', { class: 'tb-label' }, 'Bars'),
-      h('button', { class: 'tb', title: 'Remove last bar', disabled: p.measures.length <= 1, onclick: () => changeMeasures(-1) }, '−'),
-      h('span', { class: 'tb-count' }, String(p.measures.length)),
-      h('button', { class: 'tb', title: 'Add a bar', disabled: p.measures.length >= MAX_MEASURES, onclick: () => changeMeasures(1) }, '+'),
-      h('button', { class: 'tb', title: 'Undo (Ctrl+Z)', disabled: !state.undo.length, onclick: undo }, '↶')),
-    h('span', { class: 'tb-status' }, sel ? (sel.rest ? 'Rest' : pitchLabel(sel)) : ''));
+    row('tb-row-notes',
+      group(...durBtns, dotBtn, tripBtn, restBtn),
+      h('span', { class: 'tb-status' }, status)),
+    row('tb-row-pitch',
+      group(accBtn(-1, '♭', 'Flat (-)'), accBtn(0, '♮', 'Natural (N)'), accBtn(1, '♯', 'Sharp (+)'), tieBtn),
+      group(upBtn, downBtn),
+      group(delBtn, undoBtn)),
+    row('tb-row-more',
+      group(
+        h('button', { class: 'tb', title: 'Previous note (←)', onclick: () => moveSel(-1) }, '◀'),
+        h('button', { class: 'tb', title: 'Next note (→)', onclick: () => moveSel(1) }, '▶')),
+      group(
+        h('div', { class: 'seg seg-small', role: 'group', 'aria-label': 'Tap mode' },
+          h('button', { class: state.replace ? '' : 'on', title: 'Tapping inserts a note', onclick: () => { state.replace = false; refreshToolbar(); } }, 'Insert'),
+          h('button', { class: state.replace ? 'on' : '', title: 'Tapping overwrites what is there', onclick: () => { state.replace = true; refreshToolbar(); } }, 'Replace'))),
+      group(
+        wide('Select', 'Select a range: tap the first note, this, then the last note (or Shift+click)', toggleRangeMode, !hasSel, state.rangeMode),
+        wide('Bar', 'Select the whole bar', selectBar),
+        wide('Copy', 'Copy (Ctrl+C)', copySelection, !hasSel),
+        wide('Paste', 'Paste after the selection (Ctrl+V)', () => pasteClipboard(), !clipboard().length),
+        wide('Duplicate', 'Duplicate the selection (Ctrl+D)', duplicateSelection, !hasSel)),
+      group(
+        wide('8va ▲', 'Octave up (Shift+↑)', () => shiftOctave(1), !hasSel),
+        wide('8va ▼', 'Octave down (Shift+↓)', () => shiftOctave(-1), !hasSel),
+        wide('½ ▲', 'Up a semitone', () => shiftSemitone(1), !hasSel),
+        wide('½ ▼', 'Down a semitone', () => shiftSemitone(-1), !hasSel)),
+      group(
+        h('span', { class: 'tb-label' }, 'Bars'),
+        h('button', { class: 'tb', title: 'Remove last bar', disabled: p.measures.length <= 1, onclick: () => changeMeasures(-1) }, '−'),
+        h('span', { class: 'tb-count' }, String(p.measures.length)),
+        h('button', { class: 'tb', title: 'Add a bar', disabled: p.measures.length >= MAX_MEASURES, onclick: () => changeMeasures(1) }, '+'))));
   return tb;
 }
 
@@ -520,7 +551,7 @@ function drawStave(id) {
       width: ref.host.clientWidth,
       editing: isEditing,
       degrees: p.degrees !== false,
-      selected: isEditing ? state.sel : null,
+      selected: isEditing ? selectedSet() : null,
     });
   } catch (e) {
     console.error(e);
@@ -545,7 +576,7 @@ function svgPoint(layout, e) {
 
 function attachStaveEvents(p, host) {
   host.addEventListener('pointermove', (e) => {
-    if (e.pointerType !== 'mouse') return;
+    if (e.pointerType !== 'mouse' || gesture) return;
     const ref = cards.get(p.id);
     if (!ref || !ref.layout) return;
     const { x, y } = svgPoint(ref.layout, e);
@@ -553,7 +584,7 @@ function attachStaveEvents(p, host) {
     if (!g) return;
     const hit = hitTest(ref.layout, x, y);
     const ghost = hit && hit.type === 'staff' ? ghostAt(ref.layout, x, y) : null;
-    if (!ghost) { g.innerHTML = ''; host.title = ''; return; }
+    if (!ghost) { g.innerHTML = ''; return; }
     const ledgers = ghost.ledgers.map((ly) => `<line x1="${ghost.x - 10}" x2="${ghost.x + 10}" y1="${ly}" y2="${ly}"/>`).join('');
     g.innerHTML = `${ledgers}<ellipse cx="${ghost.x}" cy="${ghost.y}" rx="6" ry="4.4" transform="rotate(-20 ${ghost.x} ${ghost.y})"/>`;
   });
@@ -562,36 +593,117 @@ function attachStaveEvents(p, host) {
     const g = ref && ref.layout && $('.ghost', ref.layout.svg);
     if (g) g.innerHTML = '';
   });
+
+  // Touch on the selected note: stop the page from scrolling so the finger
+  // can drag the note up and down. Anywhere else the page scrolls normally.
+  host.addEventListener('touchstart', (e) => {
+    const ref = cards.get(p.id);
+    if (!ref || !ref.layout || e.touches.length !== 1) return;
+    const hit = hitTest(ref.layout, ...Object.values(svgPoint(ref.layout, e.touches[0])));
+    if (hit && hit.type === 'note' && isSelectedNote(hit.m, hit.i) && !p.measures[hit.m].notes[hit.i].rest) e.preventDefault();
+  }, { passive: false });
+
   host.addEventListener('pointerdown', (e) => {
     const ref = cards.get(p.id);
     if (!ref || !ref.layout || e.button > 0) return;
-    const { x, y } = svgPoint(ref.layout, e);
-    const hit = hitTest(ref.layout, x, y);
+    const pt = svgPoint(ref.layout, e);
+    const hit = hitTest(ref.layout, pt.x, pt.y);
     if (!hit) return;
-    e.preventDefault();
+    if (e.pointerType === 'mouse') e.preventDefault();
+    const note = hit.type === 'note' ? p.measures[hit.m].notes[hit.i] : null;
+    const drag = note && !note.rest && isSelectedNote(hit.m, hit.i) && !e.shiftKey;
+    gesture = { id: e.pointerId, x0: e.clientX, y0: e.clientY, t0: Date.now(), hit, drag, dragged: false, snap: false, shift: e.shiftKey };
+    if (drag) host.setPointerCapture(e.pointerId);
+  });
+
+  host.addEventListener('pointermove', (e) => {
+    if (!gesture || gesture.id !== e.pointerId) return;
+    const moved = Math.hypot(e.clientX - gesture.x0, e.clientY - gesture.y0);
+    if (!gesture.drag) {
+      if (moved > 10) gesture.cancelled = true; // it's a scroll, not a tap
+      return;
+    }
+    // Dragging the selected note changes its pitch.
+    const ref = cards.get(p.id);
+    if (!ref || !ref.layout) return;
+    const { y } = svgPoint(ref.layout, e);
+    const d = diatonicUnder(ref.layout, gesture.hit.m, y);
+    const note = selectedNote();
+    if (d === null || !note || note.rest || d === diatonicIndex(note.step, note.oct)) return;
+    if (!gesture.snap) { snapshot(p); gesture.snap = true; }
+    gesture.dragged = true;
+    const { step, oct } = fromDiatonic(d);
+    Object.assign(note, { step, oct, alter: keyAlter(p.keySig, step) });
+    audition(p, note);
+    drawStave(p.id);
+    refreshToolbar();
+  });
+
+  const finish = (e) => {
+    if (!gesture || gesture.id !== e.pointerId) return;
+    const g = gesture;
+    gesture = null;
+    if (g.dragged) return changed(p);
+    if (g.cancelled || e.type === 'pointercancel') return;
+    if (Math.hypot(e.clientX - g.x0, e.clientY - g.y0) > 10 || Date.now() - g.t0 > 800) return;
     // Clicking the staff takes keyboard focus away from the title / notes fields.
     if (document.activeElement && document.activeElement !== document.body) document.activeElement.blur();
-    if (hit.type === 'chord') return openChordPicker(p, hit.m, hit.slot, e.clientX, e.clientY);
-    if (hit.type === 'note') {
-      const note = p.measures[hit.m].notes[hit.i];
-      const isSel = state.sel && state.sel.m === hit.m && state.sel.i === hit.i;
-      if (isSel && !note.rest && diatonicIndex(note.step, note.oct) !== hit.diatonic) {
-        snapshot(p);
-        const { step, oct } = fromDiatonic(hit.diatonic);
-        Object.assign(note, { step, oct, alter: keyAlter(p.keySig, step) });
-        audition(p, note);
-        return changed(p);
-      }
-      state.sel = { m: hit.m, i: hit.i };
-      if (!note.rest) audition(p, note);
+    tapStaff(p, g.hit, e, g.shift);
+  };
+  host.addEventListener('pointerup', finish);
+  host.addEventListener('pointercancel', finish);
+}
+
+let gesture = null;
+
+const isSelectedNote = (m, i) => !!state.sel && state.sel.m === m && state.sel.i === i && !state.selEnd;
+
+// What a tap on the staff does.
+function tapStaff(p, hit, e, shift) {
+  if (hit.type === 'chord') return openChordPicker(p, hit.m, hit.slot, e.clientX, e.clientY);
+  if (hit.type === 'note') {
+    const note = p.measures[hit.m].notes[hit.i];
+    // Extend a selection (Shift+click, or the Select button on a phone).
+    if ((shift || state.rangeMode) && state.sel) {
+      state.selEnd = { m: hit.m, i: hit.i };
+      state.rangeMode = false;
       return changed(p, false);
     }
-    if (hit.type === 'staff') {
-      const { step, oct } = fromDiatonic(hit.diatonic);
-      const note = { rest: false, step, oct, alter: keyAlter(p.keySig, step), dur: state.tool.dur, dots: state.tool.dots, trip: state.tool.trip, tie: false };
-      insertNote(p, hit.m, hit.insertIndex, note);
+    const pitchDiffers = !note.rest && diatonicIndex(note.step, note.oct) !== hit.diatonic;
+    if (state.replace && (note.rest || pitchDiffers) && !note.trip) {
+      return overwriteAt(p, hit.m, hit.tick, newNoteAt(p, hit.diatonic));
     }
-  });
+    if (isSelectedNote(hit.m, hit.i) && pitchDiffers) {
+      snapshot(p);
+      const { step, oct } = fromDiatonic(hit.diatonic);
+      Object.assign(note, { step, oct, alter: keyAlter(p.keySig, step) });
+      audition(p, note);
+      return changed(p);
+    }
+    state.sel = { m: hit.m, i: hit.i };
+    state.selEnd = null;
+    if (!note.rest) audition(p, note);
+    return changed(p, false);
+  }
+  if (hit.type === 'staff') {
+    const note = newNoteAt(p, hit.diatonic);
+    // Tapping the empty part of a bar puts the note on that beat.
+    if (hit.padTick !== undefined && !note.trip) {
+      // Snap to the grid of the chosen note length (at least an eighth note),
+      // never before the music already in the bar.
+      const grid = Math.max(12, DUR_TICKS[note.dur]);
+      const used = measureTicks(p.measures[hit.m]);
+      let tick = Math.floor(hit.padTick / grid) * grid;
+      if (tick < used) tick = used;
+      return placeAt(p, hit.m, tick, note);
+    }
+    insertNote(p, hit.m, hit.insertIndex, note);
+  }
+}
+
+function newNoteAt(p, diatonic) {
+  const { step, oct } = fromDiatonic(diatonic);
+  return { rest: false, step, oct, alter: keyAlter(p.keySig, step), dur: state.tool.dur, dots: state.tool.dots, trip: state.tool.trip, tie: false };
 }
 
 function audition(p, note) {
@@ -628,7 +740,7 @@ function insertNote(p, m, index, note) {
   if (note.dur === '16') note.dots = 0;
   if (note.trip && !TRIPLET_DURATIONS.includes(note.dur)) note.trip = false;
   if (note.trip) note.dots = 0;
-  let measure = p.measures[m];
+  const measure = p.measures[m];
 
   // Filling a triplet placeholder of the same length: just replace it.
   const at = measure.notes[index];
@@ -636,6 +748,7 @@ function insertNote(p, m, index, note) {
     snapshot(p);
     measure.notes[index] = note;
     state.sel = { m, i: index };
+    state.selEnd = null;
     audition(p, note);
     changed(p);
     return true;
@@ -645,25 +758,116 @@ function insertNote(p, m, index, note) {
 
   // A new triplet note starts a whole group of three (note + 2 placeholders).
   const group = note.trip ? [note, holdRest(note.dur), holdRest(note.dur)] : [note];
-  const needed = group.reduce((sum, n) => sum + noteTicks(n), 0);
-  if (!fits(measure, needed)) {
-    // Typing past the end of a full bar continues in the next bar.
-    if (index >= measure.notes.length && m + 1 < p.measures.length && fits(p.measures[m + 1], needed)) {
-      m += 1;
-      index = 0;
-      measure = p.measures[m];
-    } else {
-      const what = note.trip ? `a ${DUR_NAMES[note.dur].toLowerCase()} triplet` : `a ${DUR_NAMES[note.dur].toLowerCase()} note`;
-      toast(`Not enough room in bar ${m + 1} for ${what}.`);
-      return false;
-    }
-  }
-  snapshot(p);
-  measure.notes.splice(index, 0, ...group);
-  state.sel = { m, i: index };
+  if (!withOverflow(p, () => measure.notes.splice(index, 0, ...group))) return false;
+  selectNote(p, note);
   audition(p, note);
   changed(p);
   return true;
+}
+
+// Make a change; if a bar overflows, push its last notes on to the next bar
+// (adding bars up to the maximum). Restores everything if it can't fit.
+function withOverflow(p, change) {
+  const before = JSON.stringify(p.measures);
+  change();
+  for (let k = 0; k < p.measures.length; k++) {
+    const ms = p.measures[k];
+    const moved = [];
+    while (measureTicks(ms) > MEASURE_TICKS && ms.notes.length) moved.unshift(ms.notes.pop());
+    // Trailing rests that get pushed out are just space: drop them.
+    while (moved.length && moved[moved.length - 1].rest && !moved[moved.length - 1].trip) moved.pop();
+    if (!moved.length) continue;
+    if (k + 1 >= p.measures.length) {
+      if (p.measures.length >= MAX_MEASURES) {
+        p.measures = JSON.parse(before);
+        toast(`The phrase is full (${MAX_MEASURES} bars). Delete or shorten something first.`);
+        return false;
+      }
+      p.measures.push(emptyMeasure());
+    }
+    p.measures[k + 1].notes.unshift(...moved);
+  }
+  state.undo.push({ id: p.id, json: JSON.stringify({ ...p, measures: JSON.parse(before) }) });
+  return true;
+}
+
+function locate(p, note) {
+  for (let m = 0; m < p.measures.length; m++) {
+    const i = p.measures[m].notes.indexOf(note);
+    if (i >= 0) return { m, i };
+  }
+  return null;
+}
+
+function selectNote(p, note, endNote = null) {
+  state.sel = locate(p, note);
+  state.selEnd = endNote && endNote !== note ? locate(p, endNote) : null;
+}
+
+// Rests filling `len` ticks starting at bar position `pos`.
+function restsFor(pos, len) {
+  const out = [];
+  let t = pos;
+  const end = pos + len;
+  while (t < end) {
+    const step = [[48, 'h'], [24, 'q'], [12, '8'], [6, '16']].find(([d]) => d <= end - t && t % d === 0);
+    if (!step) break;
+    out.push({ rest: true, dur: step[1], dots: 0, tie: false });
+    t += step[0];
+  }
+  return out;
+}
+
+// Rests at the end of a bar are shown automatically; don't store them.
+function trimTrailingRests(ms) {
+  while (ms.notes.length) {
+    const last = ms.notes[ms.notes.length - 1];
+    if (last.rest && !last.trip) ms.notes.pop();
+    else break;
+  }
+}
+
+// Put a note on a given beat in the empty part of a bar (rests before it).
+function placeAt(p, m, tick, note) {
+  const ms = p.measures[m];
+  const used = measureTicks(ms);
+  if (tick < used) return overwriteAt(p, m, tick, note);
+  const room = MEASURE_TICKS - tick;
+  if (noteTicks(note) > room) {
+    // Shorten to the longest value that fits on this beat.
+    const fit = ['h', 'q', '8', '16'].find((d) => DUR_TICKS[d] <= room);
+    if (!fit) return;
+    Object.assign(note, { dur: fit, dots: 0 });
+  }
+  snapshot(p);
+  ms.notes.push(...restsFor(used, tick - used), note);
+  selectNote(p, note);
+  audition(p, note);
+  changed(p);
+}
+
+// Replace mode: the new note takes over the time from `tick`, overwriting
+// whatever was there (the rhythm of everything after stays where it was).
+function overwriteAt(p, m, tick, note) {
+  const ms = p.measures[m];
+  let t = 0;
+  const items = ms.notes.map((n) => { const it = { n, start: t, end: t + noteTicks(n) }; t = it.end; return it; });
+  if (tick >= t) return placeAt(p, m, tick, note);
+  const len = noteTicks(note);
+  if (tick + len > MEASURE_TICKS) return toast('That note is too long for the rest of this bar.');
+  const hit = items.filter((it) => it.end > tick && it.start < tick + len);
+  if (hit.some((it) => it.n.trip)) return toast('Can\'t overwrite part of a triplet. Tap the triplet note itself to change its pitch.');
+  const crossing = items.find((it) => it.start < tick + len && it.end > tick + len);
+  const before = items.filter((it) => it.end <= tick).map((it) => it.n);
+  const after = items.filter((it) => it.start >= tick + len).map((it) => it.n);
+  const tail = crossing ? restsFor(tick + len, crossing.end - (tick + len)) : [];
+  const lead = items.length && before.length === 0 && tick > 0 ? restsFor(0, tick) : [];
+  snapshot(p);
+  ms.notes = [...lead, ...before, note, ...tail, ...after];
+  trimTrailingRests(ms);
+  selectNote(p, note);
+  audition(p, note);
+  changed(p);
 }
 
 function setDuration(dur) {
@@ -678,12 +882,9 @@ function setDuration(dur) {
       return refreshToolbar();
     }
     const next = { ...note, dur, dots: dur === '16' ? 0 : note.dots };
-    if (!fits(measure, noteTicks(next), noteTicks(note))) {
-      toast('That note is too long for the space left in this bar.');
-      return refreshToolbar();
-    }
-    snapshot(p);
-    Object.assign(note, next);
+    if (state.selEnd) return applyToRange((n) => { if (!n.trip) Object.assign(n, { dur, dots: dur === '16' ? 0 : n.dots }); }, true);
+    if (!withOverflow(p, () => Object.assign(note, next))) return refreshToolbar();
+    selectNote(p, note);
     return changed(p);
   }
   refreshToolbar();
@@ -695,10 +896,9 @@ function toggleDot() {
   if (p && note) {
     if (note.dur === '16') return toast('Dotted sixteenths aren\'t supported.');
     if (note.trip) return toast('Triplet notes can\'t be dotted.');
-    const next = { ...note, dots: note.dots ? 0 : 1 };
-    if (!fits(p.measures[state.sel.m], noteTicks(next), noteTicks(note))) return toast('Not enough room in this bar for a dot.');
-    snapshot(p);
-    note.dots = next.dots;
+    const dots = note.dots ? 0 : 1;
+    if (!withOverflow(p, () => { note.dots = dots; })) return;
+    selectNote(p, note);
     state.tool.dots = note.dots;
     return changed(p);
   }
@@ -773,6 +973,7 @@ function toggleTie() {
 }
 
 function movePitch(dir, octave = false) {
+  if (state.selEnd) return octave ? shiftOctave(dir) : shiftSemitone(dir);
   const p = editing();
   const note = selectedNote();
   if (!p || !note || note.rest) return;
@@ -799,14 +1000,43 @@ function moveSel(dir) {
   let k = state.sel ? list.findIndex((s) => s.m === state.sel.m && s.i === state.sel.i) : -1;
   k = k < 0 ? (dir > 0 ? 0 : list.length - 1) : Math.max(0, Math.min(list.length - 1, k + dir));
   state.sel = list[k];
+  state.selEnd = null;
   const note = selectedNote();
   if (note) audition(p, note);
+  changed(p, false);
+}
+
+function extendSel(dir) {
+  const p = editing();
+  if (!p || !state.sel) return moveSel(dir);
+  const list = flatIndex(p);
+  const end = state.selEnd || state.sel;
+  let k = list.findIndex((s) => s.m === end.m && s.i === end.i) + dir;
+  k = Math.max(0, Math.min(list.length - 1, k));
+  state.selEnd = list[k].m === state.sel.m && list[k].i === state.sel.i ? null : list[k];
   changed(p, false);
 }
 
 function deleteSelected() {
   const p = editing();
   if (!p || !state.sel) return;
+  if (state.selEnd) {
+    snapshot(p);
+    const range = selectedRange();
+    const firstM = range[0].m;
+    const firstI = range[0].i;
+    for (const s of [...range].reverse()) {
+      const notes = p.measures[s.m].notes;
+      if (notes[s.i].trip) notes[s.i] = holdRest(notes[s.i].dur);
+      else notes.splice(s.i, 1);
+    }
+    p.measures.forEach((ms) => removeEmptyTriplets(ms.notes));
+    state.selEnd = null;
+    const list = flatIndex(p);
+    const before = list.filter((x) => x.m < firstM || (x.m === firstM && x.i < firstI));
+    state.sel = before.length ? before[before.length - 1] : null;
+    return changed(p);
+  }
   snapshot(p);
   const { m, i } = state.sel;
   const notes = p.measures[m].notes;
@@ -875,6 +1105,130 @@ function typeLetter(step) {
   }
   const { oct } = fromDiatonic(best);
   insertNote(p, m, index, { rest: false, step, oct, alter: keyAlter(p.keySig, step), dur: state.tool.dur, dots: state.tool.dots, trip: state.tool.trip, tie: false });
+}
+
+// ---------------------------------------------------------------- selection & clipboard
+
+const CLIP_KEY = 'jazzlicks.clipboard';
+
+function selectedRange() {
+  const p = editing();
+  if (!p || !state.sel) return [];
+  const list = flatIndex(p);
+  const a = list.findIndex((s) => s.m === state.sel.m && s.i === state.sel.i);
+  if (a < 0) return [];
+  if (!state.selEnd) return [list[a]];
+  const b = list.findIndex((s) => s.m === state.selEnd.m && s.i === state.selEnd.i);
+  if (b < 0) return [list[a]];
+  return list.slice(Math.min(a, b), Math.max(a, b) + 1);
+}
+
+function selectedSet() {
+  return new Set(selectedRange().map((s) => `${s.m}:${s.i}`));
+}
+
+const rangeNotes = (p) => selectedRange().map((s) => p.measures[s.m].notes[s.i]);
+
+function selectBar() {
+  const p = editing();
+  if (!p) return;
+  const m = state.sel ? state.sel.m : 0;
+  const n = p.measures[m].notes.length;
+  if (!n) return toast('This bar is empty.');
+  state.sel = { m, i: 0 };
+  state.selEnd = n > 1 ? { m, i: n - 1 } : null;
+  changed(p, false);
+}
+
+function toggleRangeMode() {
+  if (!state.sel) return toast('Tap the first note first, then Select, then the last note.');
+  state.rangeMode = !state.rangeMode;
+  if (state.rangeMode) toast('Now tap the last note of the selection.');
+  refreshToolbar();
+}
+
+function copySelection() {
+  const p = editing();
+  if (!p || !state.sel) return toast('Select some notes first.');
+  const notes = rangeNotes(p).map((n) => ({ ...n }));
+  try { localStorage.setItem(CLIP_KEY, JSON.stringify(notes)); } catch (e) { /* ignore */ }
+  toast(`Copied ${notes.length} note${notes.length > 1 ? 's' : ''}.`);
+  refreshToolbar();
+}
+
+function clipboard() {
+  try { return JSON.parse(localStorage.getItem(CLIP_KEY)) || []; } catch (e) { return []; }
+}
+
+// Paste after the selection (or at the end of the music).
+function pasteClipboard(notes = clipboard()) {
+  const p = editing();
+  if (!p) return;
+  if (!notes.length) return toast('Nothing copied yet.');
+  const copies = notes.map((n) => ({ ...n }));
+  let m;
+  let index;
+  const range = selectedRange();
+  if (range.length) {
+    const last = range[range.length - 1];
+    m = last.m;
+    index = last.i + 1;
+  } else {
+    m = p.measures.length - 1;
+    while (m > 0 && !p.measures[m].notes.length) m--;
+    index = p.measures[m].notes.length;
+  }
+  if (!withOverflow(p, () => p.measures[m].notes.splice(index, 0, ...copies))) return;
+  selectNote(p, copies[0], copies[copies.length - 1]);
+  changed(p);
+}
+
+function duplicateSelection() {
+  const p = editing();
+  if (!p || !state.sel) return toast('Select some notes first.');
+  pasteClipboard(rangeNotes(p));
+}
+
+// Change every selected note; `reflow` re-checks bar lengths afterwards.
+function applyToRange(fn, reflow = false) {
+  const p = editing();
+  if (!p || !state.sel) return;
+  const notes = rangeNotes(p);
+  const first = notes[0];
+  const last = notes[notes.length - 1];
+  if (reflow) {
+    if (!withOverflow(p, () => notes.forEach(fn))) return;
+  } else {
+    snapshot(p);
+    notes.forEach(fn);
+  }
+  selectNote(p, first, last);
+  if (notes.length === 1 && !first.rest) audition(p, first);
+  changed(p);
+}
+
+function shiftOctave(dir) {
+  const p = editing();
+  if (!p || !state.sel) return toast('Select some notes first.');
+  const notes = rangeNotes(p).filter((n) => !n.rest);
+  const ok = notes.every((n) => {
+    const d = diatonicIndex(n.step, n.oct) + 7 * dir;
+    return d >= MIN_DIATONIC && d <= MAX_DIATONIC;
+  });
+  if (!ok) return toast(`Can't go an octave ${dir > 0 ? 'higher' : 'lower'}: some notes would be out of range.`);
+  applyToRange((n) => { if (!n.rest) n.oct += dir; });
+}
+
+function shiftSemitone(dir) {
+  const p = editing();
+  if (!p || !state.sel) return toast('Select some notes first.');
+  const flats = dir < 0 || isFlatKey(p.keySig);
+  applyToRange((n) => {
+    if (n.rest) return;
+    const sp = spellMidi(midi(n) + dir, flats);
+    const d = diatonicIndex(sp.step, sp.oct);
+    if (d >= MIN_DIATONIC && d <= MAX_DIATONIC) Object.assign(n, sp);
+  });
 }
 
 function changeMeasures(delta) {
@@ -964,6 +1318,9 @@ function setEditing(id) {
   const prev = state.editingId;
   state.editingId = id;
   state.sel = null;
+  state.selEnd = null;
+  state.rangeMode = false;
+  document.body.classList.toggle('is-editing', !!id);
   if (prev && prev !== id) rebuildCard(prev);
   if (id) rebuildCard(id);
   else if (prev) rebuildCard(prev);
@@ -1072,7 +1429,7 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') {
     if (picker) return closeChordPicker();
     if (typing) return t.blur();
-    if (state.sel) { state.sel = null; const p = editing(); return p && changed(p, false); }
+    if (state.sel) { state.sel = null; state.selEnd = null; state.rangeMode = false; const p = editing(); return p && changed(p, false); }
     if (state.editingId) return setEditing(null);
     return;
   }
@@ -1081,6 +1438,20 @@ document.addEventListener('keydown', (e) => {
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
     e.preventDefault();
     return undo();
+  }
+  if (p && (e.ctrlKey || e.metaKey) && ['c', 'v', 'd', 'a'].includes(e.key.toLowerCase())) {
+    e.preventDefault();
+    const k = e.key.toLowerCase();
+    if (k === 'c') return copySelection();
+    if (k === 'v') return pasteClipboard();
+    if (k === 'd') return duplicateSelection();
+    if (k === 'a') {
+      const list = flatIndex(p);
+      if (!list.length) return;
+      state.sel = list[0];
+      state.selEnd = list.length > 1 ? list[list.length - 1] : null;
+      return changed(p, false);
+    }
   }
   if (e.ctrlKey || e.metaKey || e.altKey) return;
   if (e.key === ' ') {
@@ -1096,8 +1467,8 @@ document.addEventListener('keydown', (e) => {
   switch (key) {
     case 'ArrowUp': handled(); return movePitch(1, e.shiftKey);
     case 'ArrowDown': handled(); return movePitch(-1, e.shiftKey);
-    case 'ArrowLeft': handled(); return moveSel(-1);
-    case 'ArrowRight': handled(); return moveSel(1);
+    case 'ArrowLeft': handled(); return e.shiftKey ? extendSel(-1) : moveSel(-1);
+    case 'ArrowRight': handled(); return e.shiftKey ? extendSel(1) : moveSel(1);
     case 'Backspace': case 'Delete': handled(); return deleteSelected();
     case '.': handled(); return toggleDot();
     case 'r': case 'R': case '0': handled(); return toggleRest();
