@@ -1303,6 +1303,7 @@ function pasteBars(p, bars, afterM, from) {
     p.measures = copies;
     // An empty lick takes on the key of what's pasted into it.
     if (from && from.keySig) p.keySig = from.keySig;
+    return { start: 0, count: copies.length };
   } else {
     if (p.measures.length + copies.length > MAX_MEASURES) {
       toast(`Not enough room: a lick can have at most ${MAX_MEASURES} bars.`);
@@ -1311,7 +1312,7 @@ function pasteBars(p, bars, afterM, from) {
     snapshot(p);
     p.measures.splice(afterM + 1, 0, ...copies);
   }
-  return true;
+  return { start: afterM + 1, count: copies.length };
 }
 
 // Paste after the selection (or at the end of the music).
@@ -1325,9 +1326,12 @@ function pasteClipboard(clip = clipboard()) {
     // Whole bars go in after the bar you're on.
     let after = range.length ? range[range.length - 1].m : p.measures.length - 1;
     if (!range.length) while (after > 0 && !p.measures[after].notes.length) after--;
-    if (!pasteBars(p, clip.bars, after, clip.from)) return;
-    state.sel = null;
-    state.selEnd = null;
+    const put = pasteBars(p, clip.bars, after, clip.from);
+    if (!put) return;
+    // Select what was pasted, ready for octave / transpose.
+    const pasted = p.measures.slice(put.start, put.start + put.count).flatMap((ms) => ms.notes);
+    if (pasted.length) selectNote(p, pasted[0], pasted[pasted.length - 1]);
+    else { state.sel = null; state.selEnd = null; }
     toast(`Pasted ${clip.bars.length} bar${clip.bars.length > 1 ? 's' : ''}.`);
     return changed(p);
   }
