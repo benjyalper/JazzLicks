@@ -18,6 +18,10 @@ Write short jazz phrases (1–6 bars) on a treble staff, add chord symbols, and 
 - A text box under each lick for your notes
 - Licks are saved in the browser, and **Sync** keeps them the same on all your devices (via a private GitHub gist). Export / Import makes backup files
 
+## Copying between licks
+
+Copied notes and bars stay available in this browser, so you can paste them into any lick. Each lick's **⋯** menu also has **Copy all bars**, **Paste copied bars** and **New lick from copied**. Pasting into an empty lick takes the copied key too.
+
 ## Tabs
 
 Pieces are grouped into **Licks**, **Scales** and **Minus 1** (chords only, for playing along). Older pieces are sorted automatically (no notes → Minus 1, Hebrew name → Licks, otherwise Scales); use **⋯ → Move to** to put anything elsewhere.
@@ -41,7 +45,8 @@ Press **Edit** on a lick (or double-click the staff).
 | Chord | Click above the staff | — |
 | Play / pause | ▶ | `Space` |
 | Select a range | Select button then the last note, or Bar | Shift+click, Shift+←→, `Ctrl+A` |
-| Copy / paste / duplicate | Copy, Paste, Duplicate | `Ctrl+C` / `Ctrl+V` / `Ctrl+D` |
+| Copy / paste / duplicate | Copy, Paste, Duplicate (whole bars copy with their chords; paste works in any lick) | `Ctrl+C` / `Ctrl+V` / `Ctrl+D` |
+| New lick from a selection | → New lick | — |
 | Octave / semitone (selection) | 8va ▲▼, ½ ▲▼ | Shift+↑↓ / ↑↓ |
 | Overwrite instead of insert | Replace | — |
 | Undo | ↶ | `Ctrl+Z` |

@@ -416,6 +416,9 @@ function buildCard(p) {
     h('div', { class: 'menu-items' },
       h('button', { onclick: () => duplicatePhrase(p.id) }, 'Duplicate'),
       h('button', { onclick: () => openGroupDialog(p.id) }, p.group ? `Group: ${p.group}…` : 'Group…'),
+      h('button', { onclick: () => copyAllBars(p.id) }, 'Copy all bars'),
+      h('button', { onclick: () => pasteIntoLick(p.id) }, 'Paste copied bars'),
+      h('button', { onclick: () => newLickFrom(clipboard()) }, 'New lick from copied'),
       h('button', { onclick: () => movePhrase(p.id, -1) }, 'Move up'),
       h('button', { onclick: () => movePhrase(p.id, 1) }, 'Move down'),
       ...CATEGORIES.filter((c) => c.id !== categoryOf(p)).map((c) => h('button', { onclick: () => moveToCategory(p.id, c.id) }, `Move to ${c.label}`)),
@@ -497,6 +500,8 @@ function buildCard(p) {
   notes.value = p.text || '';
   requestAnimationFrame(() => autoGrow(notes));
 
+  // Close the ⋯ menu after choosing an item.
+  menu.addEventListener('click', (e) => { if (e.target.closest('.menu-items button')) menu.removeAttribute('open'); });
   const passBadge = h('span', { class: 'pass-badge', hidden: true });
   const card = h('article', { class: 'lick' + (isEditing ? ' is-editing' : ''), 'data-id': p.id },
     h('header', { class: 'lick-head' }, playBtn, title, passBadge, editBtn, menu),
@@ -587,8 +592,9 @@ function buildToolbar(p) {
         wide('Select', 'Select a range: tap the first note, this, then the last note (or Shift+click)', toggleRangeMode, !hasSel, state.rangeMode),
         wide('Bar', 'Select the whole bar', selectBar),
         wide('Copy', 'Copy (Ctrl+C)', copySelection, !hasSel),
-        wide('Paste', 'Paste after the selection (Ctrl+V)', () => pasteClipboard(), !clipboard().length),
-        wide('Duplicate', 'Duplicate the selection (Ctrl+D)', duplicateSelection, !hasSel)),
+        wide('Paste', 'Paste after the selection (Ctrl+V)', () => pasteClipboard(), !clipboard().notes.length && !clipboard().bars),
+        wide('Duplicate', 'Duplicate the selection (Ctrl+D)', duplicateSelection, !hasSel),
+        wide('→ New lick', 'Make a new lick from the selection', newLickFromSelection, !hasSel)),
       group(
         wide('8va ▲', 'Octave up (Shift+↑)', () => shiftOctave(1), !hasSel),
         wide('8va ▼', 'Octave down (Shift+↓)', () => shiftOctave(-1), !hasSel),
@@ -1220,28 +1226,114 @@ function toggleRangeMode() {
   refreshToolbar();
 }
 
+// The clipboard lives in this browser, so it can be pasted into any lick.
+// { notes: [...], bars: [{ chords, notes }] | null, from: { keySig, tempo, ... } }
+function clipboard() {
+  try {
+    const c = JSON.parse(localStorage.getItem(CLIP_KEY));
+    if (Array.isArray(c)) return { notes: c, bars: null };
+    return c && Array.isArray(c.notes) ? c : { notes: [], bars: null };
+  } catch (e) {
+    return { notes: [], bars: null };
+  }
+}
+
+function setClipboard(clip) {
+  try { localStorage.setItem(CLIP_KEY, JSON.stringify(clip)); } catch (e) { /* ignore */ }
+}
+
+const deep = (x) => JSON.parse(JSON.stringify(x));
+const clipFrom = (p) => ({ keySig: p.keySig, tempo: p.tempo, style: p.style, instrument: p.instrument, title: p.title });
+
+// Bars m0..m1 as standalone bars: a bar that starts without a chord gets the
+// chord that was sounding there, so the harmony comes along.
+function barsOf(p, m0, m1) {
+  const bars = [];
+  let current = null;
+  for (let m = 0; m <= m1; m++) {
+    const ms = p.measures[m];
+    if (m >= m0) {
+      const bar = deep(ms);
+      bar.chords = bar.chords || [null, null];
+      if (!bar.chords[0] && current) bar.chords[0] = { ...current };
+      bars.push(bar);
+    }
+    for (const c of ms.chords || []) if (c) current = c;
+  }
+  return bars;
+}
+
 function copySelection() {
   const p = editing();
   if (!p || !state.sel) return toast('Select some notes first.');
+  const range = selectedRange();
   const notes = rangeNotes(p).map((n) => ({ ...n }));
-  try { localStorage.setItem(CLIP_KEY, JSON.stringify(notes)); } catch (e) { /* ignore */ }
-  toast(`Copied ${notes.length} note${notes.length > 1 ? 's' : ''}.`);
+  // Whole bars selected (Bar button, or first to last note of bars): bring the chords too.
+  const first = range[0];
+  const last = range[range.length - 1];
+  const whole = first.i === 0 && last.i === p.measures[last.m].notes.length - 1;
+  const bars = whole ? barsOf(p, first.m, last.m) : null;
+  setClipboard({ notes, bars, from: clipFrom(p) });
+  toast(bars ? `Copied ${bars.length} bar${bars.length > 1 ? 's' : ''} (with chords).` : `Copied ${notes.length} note${notes.length > 1 ? 's' : ''}.`);
   refreshToolbar();
 }
 
-function clipboard() {
-  try { return JSON.parse(localStorage.getItem(CLIP_KEY)) || []; } catch (e) { return []; }
+function copyAllBars(id) {
+  const p = byId(id);
+  if (!p) return;
+  let last = p.measures.length - 1;
+  while (last > 0 && !p.measures[last].notes.length && !(p.measures[last].chords || []).some(Boolean)) last--;
+  const bars = barsOf(p, 0, last);
+  setClipboard({ notes: bars.flatMap((b) => deep(b.notes)), bars, from: clipFrom(p) });
+  toast(`Copied ${bars.length} bar${bars.length > 1 ? 's' : ''} of “${p.title}”. Paste them into any lick.`);
+  if (state.editingId) refreshToolbar();
+}
+
+const isEmptyPhrase = (p) => p.measures.every((m) => !m.notes.length && !(m.chords || []).some(Boolean));
+
+// Insert copied bars after bar `afterM` (or fill an empty lick from the start).
+function pasteBars(p, bars, afterM, from) {
+  const copies = deep(bars);
+  if (isEmptyPhrase(p)) {
+    if (copies.length > MAX_MEASURES) {
+      toast(`A lick can have at most ${MAX_MEASURES} bars.`);
+      return false;
+    }
+    snapshot(p);
+    p.measures = copies;
+    // An empty lick takes on the key of what's pasted into it.
+    if (from && from.keySig) p.keySig = from.keySig;
+  } else {
+    if (p.measures.length + copies.length > MAX_MEASURES) {
+      toast(`Not enough room: a lick can have at most ${MAX_MEASURES} bars.`);
+      return false;
+    }
+    snapshot(p);
+    p.measures.splice(afterM + 1, 0, ...copies);
+  }
+  return true;
 }
 
 // Paste after the selection (or at the end of the music).
-function pasteClipboard(notes = clipboard()) {
+function pasteClipboard(clip = clipboard()) {
   const p = editing();
   if (!p) return;
-  if (!notes.length) return toast('Nothing copied yet.');
-  const copies = notes.map((n) => ({ ...n }));
+  if (Array.isArray(clip)) clip = { notes: clip, bars: null };
+  if (!clip.notes.length && !clip.bars) return toast('Nothing copied yet.');
+  const range = selectedRange();
+  if (clip.bars) {
+    // Whole bars go in after the bar you're on.
+    let after = range.length ? range[range.length - 1].m : p.measures.length - 1;
+    if (!range.length) while (after > 0 && !p.measures[after].notes.length) after--;
+    if (!pasteBars(p, clip.bars, after, clip.from)) return;
+    state.sel = null;
+    state.selEnd = null;
+    toast(`Pasted ${clip.bars.length} bar${clip.bars.length > 1 ? 's' : ''}.`);
+    return changed(p);
+  }
+  const copies = clip.notes.map((n) => ({ ...n }));
   let m;
   let index;
-  const range = selectedRange();
   if (range.length) {
     const last = range[range.length - 1];
     m = last.m;
@@ -1254,6 +1346,70 @@ function pasteClipboard(notes = clipboard()) {
   if (!withOverflow(p, () => p.measures[m].notes.splice(index, 0, ...copies))) return;
   selectNote(p, copies[0], copies[copies.length - 1]);
   changed(p);
+}
+
+// Card menu: append the copied bars (or notes) to the end of a lick.
+function pasteIntoLick(id) {
+  const p = byId(id);
+  const clip = clipboard();
+  if (!p) return;
+  if (!clip.notes.length && !clip.bars) return toast('Nothing copied yet.');
+  if (clip.bars) {
+    let after = p.measures.length - 1;
+    while (after > 0 && !p.measures[after].notes.length && !(p.measures[after].chords || []).some(Boolean)) after--;
+    // Drop trailing empty bars so the pasted bars follow the music directly.
+    if (!isEmptyPhrase(p)) {
+      snapshot(p);
+      p.measures = p.measures.slice(0, after + 1);
+    }
+    if (!pasteBars(p, clip.bars, p.measures.length - 1, clip.from)) return;
+  } else {
+    const copies = clip.notes.map((n) => ({ ...n }));
+    let m = p.measures.length - 1;
+    while (m > 0 && !p.measures[m].notes.length) m--;
+    if (!withOverflow(p, () => p.measures[m].notes.splice(p.measures[m].notes.length, 0, ...copies))) return;
+  }
+  save();
+  rebuildCard(id);
+  toast(`Pasted into “${p.title}”.`);
+}
+
+// A new lick made from the clipboard (or the current selection).
+function newLickFrom(clip, title) {
+  if (!clip.notes.length && !clip.bars) return toast('Nothing copied yet.');
+  const p = newPhrase(activeTab);
+  const from = clip.from || {};
+  Object.assign(p, {
+    keySig: from.keySig || p.keySig,
+    tempo: from.tempo || p.tempo,
+    style: from.style || p.style,
+    instrument: from.instrument || p.instrument,
+    title: title || (from.title ? `${from.title} (part)` : p.title),
+  });
+  if (clip.bars) {
+    p.measures = deep(clip.bars).slice(0, MAX_MEASURES);
+  } else {
+    p.measures = [emptyMeasure()];
+    p.measures[0].notes = clip.notes.map((n) => ({ ...n }));
+    if (!withOverflow(p, () => {})) return;
+  }
+  state.undo = state.undo.filter((u) => u.id !== p.id);
+  state.phrases.unshift(p);
+  save();
+  state.editingId = p.id;
+  state.sel = null;
+  state.selEnd = null;
+  renderAll();
+  const ref = cards.get(p.id);
+  if (ref) ref.el.scrollIntoView({ block: 'start', behavior: 'smooth' });
+  toast('New lick created. Rename it at the top.');
+}
+
+function newLickFromSelection() {
+  const p = editing();
+  if (!p || !state.sel) return toast('Select some notes first.');
+  copySelection();
+  newLickFrom(clipboard());
 }
 
 function duplicateSelection() {
