@@ -20,6 +20,15 @@ Write short jazz phrases (1–8 bars) on a treble staff, add chord symbols, and 
 
 ## Copying between licks
 
+While editing, switch the toolbar from **✎ Write** to **⬚ Select**. In Select mode the staff never adds notes:
+
+- **Drag** across the staff (computer), or **press and hold, then slide** (phone), over the notes or bars you want. **Tap** a note to pick just that note, or tap an empty bar to pick the whole bar.
+- When you let go, a menu opens next to the selection:
+  - **Copy**: copy just the selected notes, or the whole bar(s) with their chords.
+  - **Paste**: put copied bars into, before or after the selected bar, or put copied notes in place of, before or after the selection.
+  - **Change**: 8va ▲▼ and ½ ▲▼.
+  - **More**: New lick, Delete notes, or remove the bars.
+
 Copied notes and bars stay available in this browser, so you can paste them into any lick. Each lick's **⋯** menu also has **Copy all bars**, **Paste copied bars** and **New lick from copied**. Pasting into an empty lick takes the copied key too.
 
 ## Tabs
@@ -44,9 +53,9 @@ Press **Edit** on a lick (or double-click the staff).
 | Delete | 🗑 | `Backspace` |
 | Chord | Click above the staff | — |
 | Play / pause | ▶ | `Space` |
-| Select a range | Select button then the last note, or Bar | Shift+click, Shift+←→, `Ctrl+A` |
-| Copy / paste / duplicate | Copy, Paste, Duplicate (whole bars copy with their chords; paste works in any lick) | `Ctrl+C` / `Ctrl+V` / `Ctrl+D` |
-| New lick from a selection | → New lick | — |
+| Select notes or bars | ⬚ Select mode: drag, or hold and slide, or tap | Shift+click, Shift+←→, `Ctrl+A` |
+| Copy / paste / duplicate | The menu that opens on a selection (whole bars copy with their chords; paste works in any lick) | `Ctrl+C` / `Ctrl+V` / `Ctrl+D` |
+| New lick from a selection | Selection menu → New lick | — |
 | Octave / semitone (selection) | 8va ▲▼, ½ ▲▼ | Shift+↑↓ / ↑↓ |
 | Overwrite instead of insert | Replace | — |
 | Undo | ↶ | `Ctrl+Z` |

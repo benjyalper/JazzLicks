@@ -3,7 +3,7 @@ import {
   keyAlter, isFlatKey, fromDiatonic, diatonicIndex, MIN_DIATONIC, MAX_DIATONIC,
   noteTicks, measureTicks, midi, prettyRoot, pitchLabel, STEPS, spellMidi,
 } from './music.js';
-import { renderPhrase, hitTest, ghostAt, noteElement, diatonicUnder } from './render.js';
+import { renderPhrase, hitTest, ghostAt, noteElement, diatonicUnder, pointAt } from './render.js';
 import { player, previewNote, warmUp } from './player.js';
 import { STYLES } from './backing.js';
 import { initSync, notifyChange, connect, disconnect, syncNow, syncInfo } from './sync.js';
@@ -18,7 +18,8 @@ const state = {
   editingId: null,
   sel: null, // { m, i } in the phrase being edited (the cursor / range start)
   selEnd: null, // { m, i } other end of a selected range, or null
-  rangeMode: false, // phone: next tapped note extends the selection
+  mode: 'write', // 'write': taps add notes · 'select': taps/drags select, for copy & paste
+  area: null, // Select mode: { m0, m1, whole } — the bars the selection touches
   replace: false, // Replace mode: tapping overwrites instead of inserting
   tool: { dur: '8', dots: 0, trip: false },
   undo: [], // [{ id, json }]
@@ -243,7 +244,8 @@ function undo() {
   const idx = state.phrases.findIndex((p) => p.id === last.id);
   if (idx < 0) return;
   state.phrases[idx] = JSON.parse(last.json);
-  state.sel = null;
+  clearSelection();
+  closeSelMenu();
   save();
   rebuildCard(last.id);
 }
@@ -492,7 +494,7 @@ function buildCard(p) {
           onchange: (e) => { p.degrees = e.target.checked; save(); drawStave(p.id); },
         }), 'Degrees')));
 
-  const host = h('div', { class: 'stave-host' + (isEditing ? ' editing' : '') });
+  const host = h('div', { class: 'stave-host' + (isEditing ? ' editing' : '') + (isEditing && state.mode === 'select' ? ' select-mode' : '') });
   const notes = h('textarea', {
     class: 'notes', rows: 2, dir: 'auto', placeholder: 'Words about this lick: where it\'s from, how to use it…',
     oninput: (e) => { p.text = e.target.value; save(); autoGrow(e.target); },
@@ -526,6 +528,11 @@ function autoGrow(t) {
 
 function hintText() {
   const touch = matchMedia('(pointer: coarse)').matches;
+  if (state.mode === 'select') {
+    return touch
+      ? 'Select mode: press and hold on the staff, then slide across the notes or bars you want. Tap a note or an empty bar to pick just that. A menu with Copy and Paste opens when you let go.'
+      : 'Select mode: drag across the staff (or hold the mouse down and drag) over the notes or bars you want. Click a note or an empty bar to pick just that. A menu with Copy and Paste opens when you let go.';
+  }
   return touch
     ? 'Tap the staff to add a note (tap an empty spot to put it on that beat), tap a note to select it, drag a selected note up/down to change its pitch, tap above the staff for a chord.'
     : 'Click the staff to add a note · click above it for a chord · Shift+click to select a range · keys: A–G notes, ↑↓ pitch, Shift+↑↓ octave, 1–5 length, . dot, / triplet, R rest, T tie, ⌫ delete, Ctrl+C/V/D copy/paste/duplicate, Space play.';
@@ -572,8 +579,13 @@ function buildToolbar(p) {
   const undoBtn = h('button', { class: 'tb', title: 'Undo (Ctrl+Z)', disabled: !state.undo.length, onclick: undo }, '↶');
   const wide = (label, title, onclick, disabled = false, on = false) => h('button', { class: 'tb wide' + (on ? ' on' : ''), title, disabled, onclick }, label);
 
+  const modeSeg = h('div', { class: 'seg seg-small mode-seg', role: 'group', 'aria-label': 'Mode' },
+    h('button', { class: state.mode === 'write' ? 'on' : '', title: 'Write notes', onclick: () => setMode('write') }, '✎ Write'),
+    h('button', { class: state.mode === 'select' ? 'on' : '', title: 'Select notes or bars to copy and paste', onclick: () => setMode('select') }, '⬚ Select'));
+
   tb.append(
     row('tb-row-notes',
+      group(modeSeg),
       group(...durBtns, dotBtn, tripBtn, restBtn),
       h('span', { class: 'tb-status' }, status)),
     row('tb-row-pitch',
@@ -584,17 +596,14 @@ function buildToolbar(p) {
       group(
         h('button', { class: 'tb', title: 'Previous note (←)', onclick: () => moveSel(-1) }, '◀'),
         h('button', { class: 'tb', title: 'Next note (→)', onclick: () => moveSel(1) }, '▶')),
-      group(
-        h('div', { class: 'seg seg-small', role: 'group', 'aria-label': 'Tap mode' },
-          h('button', { class: state.replace ? '' : 'on', title: 'Tapping inserts a note', onclick: () => { state.replace = false; refreshToolbar(); } }, 'Insert'),
-          h('button', { class: state.replace ? 'on' : '', title: 'Tapping overwrites what is there', onclick: () => { state.replace = true; refreshToolbar(); } }, 'Replace'))),
-      group(
-        wide('Select', 'Select a range: tap the first note, this, then the last note (or Shift+click)', toggleRangeMode, !hasSel, state.rangeMode),
-        wide('Bar', 'Select the whole bar', selectBar),
-        wide('Copy', 'Copy (Ctrl+C)', copySelection, !hasSel),
-        wide('Paste', 'Paste after the selection (Ctrl+V)', () => pasteClipboard(), !clipboard().notes.length && !clipboard().bars),
-        wide('Duplicate', 'Duplicate the selection (Ctrl+D)', duplicateSelection, !hasSel),
-        wide('→ New lick', 'Make a new lick from the selection', newLickFromSelection, !hasSel)),
+      state.mode === 'write'
+        ? group(
+          h('div', { class: 'seg seg-small', role: 'group', 'aria-label': 'Tap mode' },
+            h('button', { class: state.replace ? '' : 'on', title: 'Tapping inserts a note', onclick: () => { state.replace = false; refreshToolbar(); } }, 'Insert'),
+            h('button', { class: state.replace ? 'on' : '', title: 'Tapping overwrites what is there', onclick: () => { state.replace = true; refreshToolbar(); } }, 'Replace')))
+        : group(
+          wide('Select all', 'Select every bar', selectAllBars),
+          wide('Menu', 'Copy / paste options for the selection', () => openSelMenuNear(p), !state.area)),
       group(
         wide('8va ▲', 'Octave up (Shift+↑)', () => shiftOctave(1), !hasSel),
         wide('8va ▼', 'Octave down (Shift+↓)', () => shiftOctave(-1), !hasSel),
@@ -614,6 +623,9 @@ function refreshToolbar() {
   const ref = cards.get(p.id);
   const old = ref && $('.toolbar', ref.el);
   if (old) old.replaceWith(buildToolbar(p));
+  const hint = ref && $('.hint', ref.el);
+  if (hint) hint.textContent = hintText();
+  if (ref) ref.host.classList.toggle('select-mode', state.mode === 'select');
 }
 
 // ---------------------------------------------------------------- staves
@@ -639,7 +651,71 @@ function drawStave(id) {
     const ghost = document.createElementNS('http://www.w3.org/2000/svg', 'g');
     ghost.setAttribute('class', 'ghost');
     ref.layout && ref.layout.svg.appendChild(ghost);
+    if (ref.layout && state.mode === 'select' && state.area && !ref.override) drawSelArea(ref.layout, p);
   }
+}
+
+// ---------------------------------------------------------------- select mode: highlight
+
+// Left edge of a bar's highlight (after the clef on the first bar of a line).
+function barLeft(layout, ml) {
+  const firstOnLine = !layout.measures.some((o) => o.line === ml.line && o.m < ml.m);
+  return firstOnLine ? ml.noteStart - 12 : ml.x0 + 2;
+}
+
+// Highlight boxes from (m0, x0) to (m1, x1), one per line of music.
+function spanRects(layout, m0, x0, m1, x1) {
+  const rects = [];
+  for (const ml of layout.measures) {
+    if (ml.m < m0 || ml.m > m1) continue;
+    const l = ml.m === m0 ? x0 : barLeft(layout, ml);
+    const r = ml.m === m1 ? x1 : ml.x1 - 2;
+    const last = rects[rects.length - 1];
+    if (last && last.line === ml.line) last.r = r;
+    else rects.push({ line: ml.line, l, r, top: ml.bandTop + 4, bottom: ml.bandBottom - 2 });
+  }
+  return rects;
+}
+
+function paintRects(layout, rects) {
+  const svg = layout.svg;
+  const old = $('.sel-area', svg);
+  if (old) old.remove();
+  const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+  g.setAttribute('class', 'sel-area');
+  for (const r of rects) {
+    const el = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    el.setAttribute('x', Math.min(r.l, r.r));
+    el.setAttribute('y', r.top);
+    el.setAttribute('width', Math.max(4, Math.abs(r.r - r.l)));
+    el.setAttribute('height', r.bottom - r.top);
+    el.setAttribute('rx', 6);
+    g.appendChild(el);
+  }
+  svg.insertBefore(g, svg.firstChild);
+}
+
+// While dragging: the raw area between the two points.
+function drawDragArea(layout, a, b) {
+  const [s, t] = isBefore(a, b) ? [a, b] : [b, a];
+  paintRects(layout, spanRects(layout, s.m, s.x, t.m, t.x));
+}
+
+const isBefore = (a, b) => a.m < b.m || (a.m === b.m && a.x <= b.x);
+
+// The settled selection: whole bars, or a box around the chosen notes.
+function drawSelArea(layout, p) {
+  const a = state.area;
+  if (a.whole) {
+    const first = layout.measures.find((ml) => ml.m === a.m0);
+    const last = layout.measures.find((ml) => ml.m === a.m1);
+    if (first && last) paintRects(layout, spanRects(layout, a.m0, barLeft(layout, first), a.m1, last.x1 - 2));
+    return;
+  }
+  const set = selectedSet();
+  const xs = layout.notes.filter((nt) => !nt.pad && set.has(`${nt.m}:${nt.i}`));
+  if (!xs.length) return;
+  paintRects(layout, spanRects(layout, xs[0].m, xs[0].x - 12, xs[xs.length - 1].m, xs[xs.length - 1].x + 12));
 }
 
 function drawAllStaves() {
@@ -675,16 +751,36 @@ function attachStaveEvents(p, host) {
   // can drag the note up and down. Anywhere else the page scrolls normally.
   host.addEventListener('touchstart', (e) => {
     const ref = cards.get(p.id);
-    if (!ref || !ref.layout || e.touches.length !== 1) return;
+    if (!ref || !ref.layout || e.touches.length !== 1 || state.mode === 'select') return;
     const hit = hitTest(ref.layout, ...Object.values(svgPoint(ref.layout, e.touches[0])));
     if (hit && hit.type === 'note' && isSelectedNote(hit.m, hit.i) && !p.measures[hit.m].notes[hit.i].rest) e.preventDefault();
   }, { passive: false });
+  // Select mode: once a press-and-hold has started a selection, the finger
+  // slides the selection instead of scrolling the page.
+  host.addEventListener('touchmove', (e) => {
+    if (gesture && gesture.select && gesture.area) e.preventDefault();
+  }, { passive: false });
+  host.addEventListener('contextmenu', (e) => {
+    if (state.mode === 'select' && state.editingId === p.id) e.preventDefault();
+  });
 
   host.addEventListener('pointerdown', (e) => {
     const ref = cards.get(p.id);
     if (!ref || !ref.layout || e.button > 0) return;
     const pt = svgPoint(ref.layout, e);
     const hit = hitTest(ref.layout, pt.x, pt.y);
+    if (state.mode === 'select' && state.editingId === p.id) {
+      if (ref.override) return toast('Showing another key while practising. Stop playback to edit.');
+      const anchor = pointAt(ref.layout, pt.x, pt.y);
+      if (!anchor) return;
+      if (e.pointerType === 'mouse') e.preventDefault();
+      const g = { id: e.pointerId, select: true, mouse: e.pointerType === 'mouse', x0: e.clientX, y0: e.clientY, t0: Date.now(), hit, anchor, last: anchor, area: false };
+      // Holding still for a moment starts a selection (needed on touch screens,
+      // where a plain slide scrolls the page).
+      g.timer = setTimeout(() => { if (gesture === g && !g.cancelled) startArea(p, g); }, 350);
+      gesture = g;
+      return;
+    }
     if (!hit) return;
     if (e.pointerType === 'mouse') e.preventDefault();
     const note = hit.type === 'note' ? p.measures[hit.m].notes[hit.i] : null;
@@ -696,6 +792,19 @@ function attachStaveEvents(p, host) {
   host.addEventListener('pointermove', (e) => {
     if (!gesture || gesture.id !== e.pointerId) return;
     const moved = Math.hypot(e.clientX - gesture.x0, e.clientY - gesture.y0);
+    if (gesture.select) {
+      if (!gesture.area) {
+        if (gesture.mouse && moved > 5) startArea(p, gesture);
+        else if (!gesture.mouse && moved > 10) { gesture.cancelled = true; clearTimeout(gesture.timer); }
+        if (!gesture.area) return;
+      }
+      const ref = cards.get(p.id);
+      if (!ref || !ref.layout) return;
+      const pt = svgPoint(ref.layout, e);
+      gesture.last = pointAt(ref.layout, pt.x, pt.y) || gesture.last;
+      drawDragArea(ref.layout, gesture.anchor, gesture.last);
+      return;
+    }
     if (!gesture.drag) {
       if (moved > 10) gesture.cancelled = true; // it's a scroll, not a tap
       return;
@@ -720,6 +829,7 @@ function attachStaveEvents(p, host) {
     if (!gesture || gesture.id !== e.pointerId) return;
     const g = gesture;
     gesture = null;
+    if (g.select) return finishSelect(p, g, e);
     if (g.dragged) return changed(p);
     if (g.cancelled || e.type === 'pointercancel') return;
     if (Math.hypot(e.clientX - g.x0, e.clientY - g.y0) > 10 || Date.now() - g.t0 > 800) return;
@@ -733,6 +843,33 @@ function attachStaveEvents(p, host) {
 
 let gesture = null;
 
+function startArea(p, g) {
+  const ref = cards.get(p.id);
+  if (!ref || !ref.layout) return;
+  g.area = true;
+  clearTimeout(g.timer);
+  closeSelMenu();
+  if (g.mouse) { try { ref.host.setPointerCapture(g.id); } catch (e) { /* ignore */ } }
+  if (!g.mouse && navigator.vibrate) navigator.vibrate(10);
+  drawDragArea(ref.layout, g.anchor, g.last);
+}
+
+function finishSelect(p, g, e) {
+  clearTimeout(g.timer);
+  const ref = cards.get(p.id);
+  if (!ref || !ref.layout) return;
+  if (g.cancelled || e.type === 'pointercancel') {
+    if (g.area) drawStave(p.id);
+    return;
+  }
+  if (document.activeElement && document.activeElement !== document.body) document.activeElement.blur();
+  const dragged = g.area && (g.last.m !== g.anchor.m || Math.abs(g.last.x - g.anchor.x) > 8);
+  if (dragged) selectBetween(p, ref.layout, g.anchor, g.last);
+  else selectAt(p, g.hit, g.anchor);
+  changed(p, false);
+  openSelMenuNear(p, e.clientX);
+}
+
 const isSelectedNote = (m, i) => !!state.sel && state.sel.m === m && state.sel.i === i && !state.selEnd;
 
 // What a tap on the staff does.
@@ -742,10 +879,9 @@ function tapStaff(p, hit, e, shift) {
   if (hit.type === 'chord') return openChordPicker(p, hit.m, hit.slot, e.clientX, e.clientY);
   if (hit.type === 'note') {
     const note = p.measures[hit.m].notes[hit.i];
-    // Extend a selection (Shift+click, or the Select button on a phone).
-    if ((shift || state.rangeMode) && state.sel) {
+    // Shift+click extends a selection.
+    if (shift && state.sel) {
       state.selEnd = { m: hit.m, i: hit.i };
-      state.rangeMode = false;
       return changed(p, false);
     }
     const pitchDiffers = !note.rest && diatonicIndex(note.step, note.oct) !== hit.diatonic;
@@ -1080,6 +1216,7 @@ function moveSel(dir) {
   k = k < 0 ? (dir > 0 ? 0 : list.length - 1) : Math.max(0, Math.min(list.length - 1, k + dir));
   state.sel = list[k];
   state.selEnd = null;
+  areaFromSel(p);
   const note = selectedNote();
   if (note) audition(p, note);
   changed(p, false);
@@ -1093,6 +1230,7 @@ function extendSel(dir) {
   let k = list.findIndex((s) => s.m === end.m && s.i === end.i) + dir;
   k = Math.max(0, Math.min(list.length - 1, k));
   state.selEnd = list[k].m === state.sel.m && list[k].i === state.sel.i ? null : list[k];
+  areaFromSel(p);
   changed(p, false);
 }
 
@@ -1114,6 +1252,7 @@ function deleteSelected() {
     const list = flatIndex(p);
     const before = list.filter((x) => x.m < firstM || (x.m === firstM && x.i < firstI));
     state.sel = before.length ? before[before.length - 1] : null;
+    if (state.mode === 'select') clearSelection();
     return changed(p);
   }
   snapshot(p);
@@ -1132,6 +1271,7 @@ function deleteSelected() {
   // Select the note before the deleted one (or nothing).
   const before = list.filter((s) => s.m < m || (s.m === m && s.i < i));
   state.sel = before.length ? before[before.length - 1] : null;
+  if (state.mode === 'select') clearSelection();
   changed(p);
 }
 
@@ -1208,24 +1348,6 @@ function selectedSet() {
 
 const rangeNotes = (p) => selectedRange().map((s) => p.measures[s.m].notes[s.i]);
 
-function selectBar() {
-  const p = editing();
-  if (!p) return;
-  const m = state.sel ? state.sel.m : 0;
-  const n = p.measures[m].notes.length;
-  if (!n) return toast('This bar is empty.');
-  state.sel = { m, i: 0 };
-  state.selEnd = n > 1 ? { m, i: n - 1 } : null;
-  changed(p, false);
-}
-
-function toggleRangeMode() {
-  if (!state.sel) return toast('Tap the first note first, then Select, then the last note.');
-  state.rangeMode = !state.rangeMode;
-  if (state.rangeMode) toast('Now tap the last note of the selection.');
-  refreshToolbar();
-}
-
 // The clipboard lives in this browser, so it can be pasted into any lick.
 // { notes: [...], bars: [{ chords, notes }] | null, from: { keySig, tempo, ... } }
 function clipboard() {
@@ -1263,59 +1385,95 @@ function barsOf(p, m0, m1) {
   return bars;
 }
 
+const plural = (k, word) => `${k} ${word}${k === 1 ? '' : 's'}`;
+const barsLabel = (m0, m1) => (m0 === m1 ? `bar ${m0 + 1}` : `bars ${m0 + 1}–${m1 + 1}`);
+const emptyBar = (ms) => !ms.notes.length && !(ms.chords || []).some(Boolean);
+
+function copyNotes(p) {
+  const notes = rangeNotes(p).map((n) => ({ ...n }));
+  if (!notes.length) return toast('Select some notes first.');
+  setClipboard({ notes, bars: null, from: clipFrom(p) });
+  toast(`Copied ${plural(notes.length, 'note')}.`);
+  refreshToolbar();
+}
+
+function copyBars(p, m0, m1) {
+  const bars = barsOf(p, m0, m1);
+  setClipboard({ notes: bars.flatMap((b) => deep(b.notes)), bars, from: clipFrom(p) });
+  toast(`Copied ${plural(bars.length, 'bar')}${bars.some((b) => b.chords.some(Boolean)) ? ' (with chords)' : ''}.`);
+  refreshToolbar();
+}
+
+// Ctrl+C.
 function copySelection() {
   const p = editing();
-  if (!p || !state.sel) return toast('Select some notes first.');
+  if (!p) return;
+  const a = state.area;
+  if (state.mode === 'select' && a) return a.whole ? copyBars(p, a.m0, a.m1) : copyNotes(p);
+  if (!state.sel) return toast('Select some notes first.');
+  // Whole bars selected (first to last note of bars): bring the chords too.
   const range = selectedRange();
-  const notes = rangeNotes(p).map((n) => ({ ...n }));
-  // Whole bars selected (Bar button, or first to last note of bars): bring the chords too.
   const first = range[0];
   const last = range[range.length - 1];
   const whole = first.i === 0 && last.i === p.measures[last.m].notes.length - 1;
-  const bars = whole ? barsOf(p, first.m, last.m) : null;
-  setClipboard({ notes, bars, from: clipFrom(p) });
-  toast(bars ? `Copied ${bars.length} bar${bars.length > 1 ? 's' : ''} (with chords).` : `Copied ${notes.length} note${notes.length > 1 ? 's' : ''}.`);
-  refreshToolbar();
+  return whole ? copyBars(p, first.m, last.m) : copyNotes(p);
 }
 
 function copyAllBars(id) {
   const p = byId(id);
   if (!p) return;
   let last = p.measures.length - 1;
-  while (last > 0 && !p.measures[last].notes.length && !(p.measures[last].chords || []).some(Boolean)) last--;
+  while (last > 0 && emptyBar(p.measures[last])) last--;
   const bars = barsOf(p, 0, last);
   setClipboard({ notes: bars.flatMap((b) => deep(b.notes)), bars, from: clipFrom(p) });
-  toast(`Copied ${bars.length} bar${bars.length > 1 ? 's' : ''} of “${p.title}”. Paste them into any lick.`);
+  toast(`Copied ${plural(bars.length, 'bar')} of “${p.title}”. Paste them into any lick.`);
   if (state.editingId) refreshToolbar();
 }
 
-const isEmptyPhrase = (p) => p.measures.every((m) => !m.notes.length && !(m.chords || []).some(Boolean));
+const isEmptyPhrase = (p) => p.measures.every(emptyBar);
 
-// Insert copied bars after bar `afterM` (or fill an empty lick from the start).
-function pasteBars(p, bars, afterM, from) {
+// Put copied bars in at bar `start`: `over` writes over the bars there (adding
+// bars at the end if needed), otherwise they are inserted.
+function pasteBarsAt(p, bars, start, over, from) {
   const copies = deep(bars);
-  if (isEmptyPhrase(p)) {
-    if (copies.length > MAX_MEASURES) {
-      toast(`A lick can have at most ${MAX_MEASURES} bars.`);
-      return false;
-    }
-    snapshot(p);
-    p.measures = copies;
-    // An empty lick takes on the key of what's pasted into it.
-    if (from && from.keySig) p.keySig = from.keySig;
-    return { start: 0, count: copies.length };
-  } else {
-    if (p.measures.length + copies.length > MAX_MEASURES) {
-      toast(`Not enough room: a lick can have at most ${MAX_MEASURES} bars.`);
-      return false;
-    }
-    snapshot(p);
-    p.measures.splice(afterM + 1, 0, ...copies);
+  const len = over ? Math.max(p.measures.length, start + copies.length) : p.measures.length + copies.length;
+  if (len > MAX_MEASURES) {
+    toast(`Not enough room: a lick can have at most ${MAX_MEASURES} bars.`);
+    return null;
   }
-  return { start: afterM + 1, count: copies.length };
+  const wasEmpty = isEmptyPhrase(p);
+  snapshot(p);
+  if (over) copies.forEach((b, k) => { p.measures[start + k] = b; });
+  else p.measures.splice(start, 0, ...copies);
+  // An empty lick takes on the key of what's pasted into it.
+  if (wasEmpty && from && from.keySig) p.keySig = from.keySig;
+  return { start, count: copies.length };
 }
 
-// Paste after the selection (or at the end of the music).
+// The first bar after the music (0 in an empty lick).
+function afterMusic(p) {
+  let m = p.measures.length;
+  while (m > 0 && emptyBar(p.measures[m - 1])) m--;
+  return m;
+}
+
+// Paste bars after bar `afterM`, using up empty bars there rather than
+// pushing them along.
+function pasteBarsAfter(p, clip, afterM) {
+  const start = afterM + 1;
+  const n = clip.bars.length;
+  const over = p.measures.slice(start, start + n).every(emptyBar);
+  return pasteBarsAt(p, clip.bars, start, over, clip.from);
+}
+
+// Select bars m0..m1 (and the notes in them).
+function selectBars(p, m0, m1) {
+  const list = [];
+  for (let m = m0; m <= m1; m++) p.measures[m].notes.forEach((_, i) => list.push({ m, i }));
+  setArea(p, m0, m1, list);
+}
+
+// Ctrl+V: paste after the selection (or after the music).
 function pasteClipboard(clip = clipboard()) {
   const p = editing();
   if (!p) return;
@@ -1323,16 +1481,12 @@ function pasteClipboard(clip = clipboard()) {
   if (!clip.notes.length && !clip.bars) return toast('Nothing copied yet.');
   const range = selectedRange();
   if (clip.bars) {
-    // Whole bars go in after the bar you're on.
-    let after = range.length ? range[range.length - 1].m : p.measures.length - 1;
-    if (!range.length) while (after > 0 && !p.measures[after].notes.length) after--;
-    const put = pasteBars(p, clip.bars, after, clip.from);
+    const afterM = state.mode === 'select' && state.area ? state.area.m1 : range.length ? range[range.length - 1].m : afterMusic(p) - 1;
+    const put = pasteBarsAfter(p, clip, afterM);
     if (!put) return;
     // Select what was pasted, ready for octave / transpose.
-    const pasted = p.measures.slice(put.start, put.start + put.count).flatMap((ms) => ms.notes);
-    if (pasted.length) selectNote(p, pasted[0], pasted[pasted.length - 1]);
-    else { state.sel = null; state.selEnd = null; }
-    toast(`Pasted ${clip.bars.length} bar${clip.bars.length > 1 ? 's' : ''}.`);
+    selectBars(p, put.start, put.start + put.count - 1);
+    toast(`Pasted ${plural(put.count, 'bar')} into ${barsLabel(put.start, put.start + put.count - 1)}.`);
     return changed(p);
   }
   const copies = clip.notes.map((n) => ({ ...n }));
@@ -1348,9 +1502,237 @@ function pasteClipboard(clip = clipboard()) {
     index = p.measures[m].notes.length;
   }
   if (!withOverflow(p, () => p.measures[m].notes.splice(index, 0, ...copies))) return;
-  selectNote(p, copies[0], copies[copies.length - 1]);
+  selectPasted(p, copies);
   changed(p);
 }
+
+function selectPasted(p, copies) {
+  const locs = copies.map((n) => locate(p, n)).filter(Boolean);
+  if (!locs.length) return clearSelection();
+  setArea(p, locs[0].m, locs[locs.length - 1].m, locs);
+}
+
+// ---------------------------------------------------------------- select mode: choosing
+
+function clearSelection() {
+  state.sel = null;
+  state.selEnd = null;
+  state.area = null;
+}
+
+function setMode(mode) {
+  state.mode = mode;
+  clearSelection();
+  closeSelMenu();
+  const p = editing();
+  if (p) changed(p, false);
+}
+
+// Select the notes `list` ({m, i} in order) within bars m0..m1. A bar at
+// either end whose notes were all left out (the drag began after them) is
+// dropped; an empty bar stays, so it can be pasted into.
+function setArea(p, m0, m1, list) {
+  if (list.length) {
+    if (p.measures[m0].notes.length && list[0].m !== m0) m0 = list[0].m;
+    if (p.measures[m1].notes.length && list[list.length - 1].m !== m1) m1 = list[list.length - 1].m;
+  }
+  state.sel = list.length ? { m: list[0].m, i: list[0].i } : null;
+  state.selEnd = list.length > 1 ? { m: list[list.length - 1].m, i: list[list.length - 1].i } : null;
+  let total = 0;
+  for (let m = m0; m <= m1; m++) total += p.measures[m].notes.length;
+  state.area = { m0, m1, whole: list.length === total };
+}
+
+// Everything between two dragged-to points.
+function selectBetween(p, layout, a, b) {
+  const [s, t] = isBefore(a, b) ? [a, b] : [b, a];
+  const inside = layout.notes.filter((nt) => !nt.pad
+    && (nt.m > s.m || (nt.m === s.m && nt.x >= s.x - 6))
+    && (nt.m < t.m || (nt.m === t.m && nt.x <= t.x + 6)));
+  setArea(p, s.m, t.m, inside.map((nt) => ({ m: nt.m, i: nt.i })));
+}
+
+// A tap: a note on its own, or else the whole bar.
+function selectAt(p, hit, at) {
+  if (hit && hit.type === 'note') return setArea(p, hit.m, hit.m, [{ m: hit.m, i: hit.i }]);
+  selectBars(p, hit ? hit.m : at.m, hit ? hit.m : at.m);
+}
+
+// Keep the highlight in step when the selection moves by keyboard.
+function areaFromSel(p) {
+  if (state.mode !== 'select') return;
+  const range = selectedRange();
+  if (!range.length) { state.area = null; return; }
+  setArea(p, range[0].m, range[range.length - 1].m, range);
+}
+
+function selectAllBars() {
+  const p = editing();
+  if (!p) return;
+  selectBars(p, 0, Math.max(0, afterMusic(p) - 1));
+  changed(p, false);
+  openSelMenuNear(p);
+}
+
+function removeBars(p, m0, m1) {
+  if (m1 - m0 + 1 >= p.measures.length) return toast('A lick needs at least one bar.');
+  snapshot(p);
+  p.measures.splice(m0, m1 - m0 + 1);
+  clearSelection();
+  toast(`Removed ${barsLabel(m0, m1)}.`);
+  changed(p);
+}
+
+function pasteNotesHow(p, how) {
+  const clip = clipboard();
+  const copies = clip.notes.map((n) => ({ ...n }));
+  const range = selectedRange();
+  const a = state.area;
+  if (!copies.length) return;
+  const ok = withOverflow(p, () => {
+    if (how === 'into') {
+      p.measures[a.m0].notes.push(...copies);
+    } else if (how === 'before') {
+      p.measures[range[0].m].notes.splice(range[0].i, 0, ...copies);
+    } else if (how === 'after') {
+      const last = range[range.length - 1];
+      p.measures[last.m].notes.splice(last.i + 1, 0, ...copies);
+    } else {
+      const { m, i } = range[0];
+      for (const sel of [...range].reverse()) p.measures[sel.m].notes.splice(sel.i, 1);
+      p.measures[m].notes.splice(i, 0, ...copies);
+    }
+  });
+  if (!ok) return;
+  if (how === 'replace') p.measures.forEach((ms) => removeEmptyTriplets(ms.notes));
+  selectPasted(p, copies);
+  toast(`Pasted ${plural(copies.length, 'note')}.`);
+  changed(p);
+}
+
+function pasteBarsHow(p, how) {
+  const clip = clipboard();
+  const a = state.area;
+  const start = how === 'after' ? a.m1 + 1 : a.m0;
+  const put = pasteBarsAt(p, clip.bars, start, how === 'over', clip.from);
+  if (!put) return;
+  selectBars(p, put.start, put.start + put.count - 1);
+  toast(`Pasted ${plural(put.count, 'bar')} into ${barsLabel(put.start, put.start + put.count - 1)}.`);
+  changed(p);
+}
+
+// ---------------------------------------------------------------- select mode: the menu
+
+let selMenu = null;
+
+function closeSelMenu() {
+  if (selMenu) {
+    selMenu.el.remove();
+    selMenu = null;
+  }
+}
+
+// Open the menu just below (or above) the highlighted area, so it doesn't
+// cover the selected notes.
+function openSelMenuNear(p, cx) {
+  const ref = cards.get(p.id);
+  if (!ref) return;
+  const rects = ref.layout ? [...ref.layout.svg.querySelectorAll('.sel-area rect')].map((r) => r.getBoundingClientRect()) : [];
+  if (!rects.length) rects.push(ref.host.getBoundingClientRect());
+  const box = {
+    left: Math.min(...rects.map((r) => r.left)), right: Math.max(...rects.map((r) => r.right)),
+    top: Math.min(...rects.map((r) => r.top)), bottom: Math.max(...rects.map((r) => r.bottom)),
+  };
+  openSelMenu(p, cx === undefined ? (box.left + box.right) / 2 : cx, box);
+}
+
+function openSelMenu(p, cx, box) {
+  closeSelMenu();
+  const a = state.area;
+  if (!a) return;
+  const n = selectedRange().length;
+  const clip = clipboard();
+  const where = barsLabel(a.m0, a.m1);
+  const reopen = () => { if (state.area) openSelMenuNear(p, cx); };
+  const btn = (label, fn, { keep = false, cls = '', title = '' } = {}) => h('button', {
+    class: `sm-btn ${cls}`.trim(), title,
+    onclick: () => { closeSelMenu(); fn(); if (keep) reopen(); },
+  }, label);
+  const section = (label, ...buttons) => h('div', { class: 'sm-section' },
+    h('div', { class: 'sm-label' }, label), h('div', { class: 'sm-buttons' }, ...buttons.filter(Boolean)));
+
+  const hasChords = p.measures.slice(a.m0, a.m1 + 1).some((ms) => (ms.chords || []).some(Boolean));
+  const title = n ? `${plural(n, 'note')} · ${where}` : `${where[0].toUpperCase()}${where.slice(1)} (no notes)`;
+
+  // Copy: when only part of a bar is chosen, offer the whole bar too.
+  const withChords = hasChords ? ' with chords' : '';
+  let copy = null;
+  if (n && a.whole) {
+    copy = section('Copy',
+      btn(`Copy ${where}${withChords}`, () => copyBars(p, a.m0, a.m1), { cls: 'primary' }),
+      hasChords ? btn('Copy the notes only', () => copyNotes(p)) : null);
+  } else if (n) {
+    copy = section('Copy',
+      btn(n === 1 ? 'Copy this note' : `Copy these ${n} notes`, () => copyNotes(p), { cls: 'primary' }),
+      btn(`Copy the whole ${where}${withChords}`, () => copyBars(p, a.m0, a.m1)));
+  } else if (hasChords) {
+    copy = section('Copy', btn(`Copy ${where} (chords)`, () => copyBars(p, a.m0, a.m1)));
+  }
+
+  let paste = null;
+  if (clip.bars) {
+    const len = clip.bars.length;
+    const targetEmpty = p.measures.slice(a.m0, a.m0 + len).every(emptyBar);
+    paste = section(`Paste the ${plural(len, 'copied bar')}`,
+      btn(`${targetEmpty ? 'Paste into' : 'Paste over'} ${barsLabel(a.m0, a.m0 + len - 1)}`, () => pasteBarsHow(p, 'over'), { cls: targetEmpty ? 'primary' : '' }),
+      btn(`Insert before ${barsLabel(a.m0, a.m0)}`, () => pasteBarsHow(p, 'before')),
+      btn(`Insert after ${barsLabel(a.m1, a.m1)}`, () => pasteBarsHow(p, 'after')));
+  } else if (clip.notes.length) {
+    const label = `Paste the ${plural(clip.notes.length, 'copied note')}`;
+    paste = n
+      ? section(label,
+        btn('Replace the selection', () => pasteNotesHow(p, 'replace')),
+        btn('Insert before', () => pasteNotesHow(p, 'before')),
+        btn('Insert after', () => pasteNotesHow(p, 'after')))
+      : section(label, btn(`Paste into ${barsLabel(a.m0, a.m0)}`, () => pasteNotesHow(p, 'into'), { cls: 'primary' }));
+  }
+
+  const change = n ? section('Change',
+    btn('8va ▲', () => shiftOctave(1), { keep: true, title: 'Octave up' }),
+    btn('8va ▼', () => shiftOctave(-1), { keep: true, title: 'Octave down' }),
+    btn('½ ▲', () => shiftSemitone(1), { keep: true, title: 'Up a semitone' }),
+    btn('½ ▼', () => shiftSemitone(-1), { keep: true, title: 'Down a semitone' })) : null;
+
+  const more = section('More',
+    n ? btn('→ New lick', newLickFromSelection, { title: 'Make a new lick from the selection' }) : null,
+    n ? btn('Delete notes', deleteSelected, { cls: 'danger' }) : null,
+    a.whole && p.measures.length > a.m1 - a.m0 + 1 ? btn(`Remove ${where}`, () => removeBars(p, a.m0, a.m1), { cls: 'danger' }) : null);
+
+  const el = h('div', { class: 'sel-menu', role: 'dialog', 'aria-label': 'Selection' },
+    h('div', { class: 'sm-head' },
+      h('span', {}, title),
+      h('button', { class: 'sm-close', 'aria-label': 'Close', onclick: closeSelMenu }, '✕')),
+    copy, paste, change,
+    more.querySelector('button') ? more : null);
+  document.body.appendChild(el);
+  // Next to the pointer, kept on screen (and above the phone toolbar).
+  const r = el.getBoundingClientRect();
+  const bar = document.body.classList.contains('is-editing') && $('.toolbar') ? $('.toolbar').getBoundingClientRect() : null;
+  const bottomLimit = bar && bar.top > window.innerHeight / 2 ? bar.top - 8 : window.innerHeight - 8;
+  const left = Math.min(Math.max(8, cx - r.width / 2), window.innerWidth - r.width - 8);
+  let top = box.bottom + 6;
+  if (top + r.height > bottomLimit) {
+    top = box.top - r.height - 6; // above the selection
+    if (top < 8) top = Math.max(8, bottomLimit - r.height); // no room either way: as low as possible
+  }
+  el.style.left = `${Math.max(8, left)}px`;
+  el.style.top = `${top}px`;
+  selMenu = { el, id: p.id };
+}
+
+document.addEventListener('pointerdown', (e) => {
+  if (selMenu && !selMenu.el.contains(e.target)) closeSelMenu();
+}, true);
 
 // Card menu: append the copied bars (or notes) to the end of a lick.
 function pasteIntoLick(id) {
@@ -1359,14 +1741,8 @@ function pasteIntoLick(id) {
   if (!p) return;
   if (!clip.notes.length && !clip.bars) return toast('Nothing copied yet.');
   if (clip.bars) {
-    let after = p.measures.length - 1;
-    while (after > 0 && !p.measures[after].notes.length && !(p.measures[after].chords || []).some(Boolean)) after--;
-    // Drop trailing empty bars so the pasted bars follow the music directly.
-    if (!isEmptyPhrase(p)) {
-      snapshot(p);
-      p.measures = p.measures.slice(0, after + 1);
-    }
-    if (!pasteBars(p, clip.bars, p.measures.length - 1, clip.from)) return;
+    // Straight after the music, using up any empty bars there.
+    if (!pasteBarsAt(p, clip.bars, afterMusic(p), true, clip.from)) return;
   } else {
     const copies = clip.notes.map((n) => ({ ...n }));
     let m = p.measures.length - 1;
@@ -1401,8 +1777,8 @@ function newLickFrom(clip, title) {
   state.phrases.unshift(p);
   save();
   state.editingId = p.id;
-  state.sel = null;
-  state.selEnd = null;
+  clearSelection();
+  closeSelMenu();
   renderAll();
   const ref = cards.get(p.id);
   if (ref) ref.el.scrollIntoView({ block: 'start', behavior: 'smooth' });
@@ -1474,6 +1850,7 @@ function changeMeasures(delta) {
   else {
     p.measures.pop();
     if (state.sel && state.sel.m >= n) state.sel = null;
+    if (state.area && state.area.m1 >= n) { clearSelection(); closeSelMenu(); }
   }
   changed(p);
 }
@@ -1552,7 +1929,8 @@ function setEditing(id) {
   state.editingId = id;
   state.sel = null;
   state.selEnd = null;
-  state.rangeMode = false;
+  state.area = null;
+  closeSelMenu();
   document.body.classList.toggle('is-editing', !!id);
   if (prev && prev !== id) rebuildCard(prev);
   if (id) rebuildCard(id);
@@ -1680,8 +2058,9 @@ document.addEventListener('keydown', (e) => {
   const typing = t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable);
   if (e.key === 'Escape') {
     if (picker) return closeChordPicker();
+    if (selMenu) return closeSelMenu();
     if (typing) return t.blur();
-    if (state.sel) { state.sel = null; state.selEnd = null; state.rangeMode = false; const p = editing(); return p && changed(p, false); }
+    if (state.sel || state.area) { clearSelection(); const p = editing(); return p && changed(p, false); }
     if (state.editingId) return setEditing(null);
     return;
   }
@@ -1702,6 +2081,7 @@ document.addEventListener('keydown', (e) => {
       if (!list.length) return;
       state.sel = list[0];
       state.selEnd = list.length > 1 ? list[list.length - 1] : null;
+      areaFromSel(p);
       return changed(p, false);
     }
   }

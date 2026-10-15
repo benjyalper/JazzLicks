@@ -459,6 +459,21 @@ export function hitTest(layout, x, y) {
   return { type: 'staff', m: ml.m, insertIndex, diatonic, padTick };
 }
 
+/** The bar nearest to (x, y), for dragging a selection: { m, x } with x kept inside that bar. */
+export function pointAt(layout, x, y) {
+  if (!layout.measures.length) return null;
+  // Pick the system (line) under y, or the closest one.
+  let line = layout.measures[0].line;
+  let best = Infinity;
+  for (const ml of layout.measures) {
+    const d = y < ml.bandTop ? ml.bandTop - y : y >= ml.bandBottom ? y - ml.bandBottom + 1 : 0;
+    if (d < best) { best = d; line = ml.line; }
+  }
+  const row = layout.measures.filter((ml) => ml.line === line);
+  const ml = row.find((r) => x >= r.x0 && x <= r.x1) || (x < row[0].x0 ? row[0] : row[row.length - 1]);
+  return { m: ml.m, x: Math.max(ml.x0, Math.min(ml.x1, x)) };
+}
+
 /** Staff position (diatonic step) under a y coordinate in a given bar. */
 export function diatonicUnder(layout, m, y) {
   const ml = layout.measures.find((x) => x.m === m);
