@@ -9,7 +9,7 @@ import { STYLES } from './backing.js';
 import { initSync, notifyChange, connect, disconnect, syncNow, syncInfo } from './sync.js';
 
 const STORAGE_KEY = 'jazzlicks.v1';
-const MAX_MEASURES = 6;
+const MAX_MEASURES = 8;
 
 // ---------------------------------------------------------------- state
 

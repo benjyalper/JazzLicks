@@ -1,6 +1,6 @@
 # JazzLicks
 
-Write short jazz phrases (1–6 bars) on a treble staff, add chord symbols, and hear them played back on piano or classical (nylon) guitar.
+Write short jazz phrases (1–8 bars) on a treble staff, add chord symbols, and hear them played back on piano or classical (nylon) guitar.
 
 **Live app:** https://benjyalper.github.io/JazzLicks/
 
@@ -28,7 +28,7 @@ Pieces are grouped into **Licks**, **Scales** and **Minus 1** (chords only, for 
 
 ## Editing
 
-When a bar is full, inserting a note pushes the following notes on into the next bar (up to 6 bars). On phones the editing toolbar sits at the bottom of the screen, and scrolling never adds notes.
+When a bar is full, inserting a note pushes the following notes on into the next bar (up to 8 bars). On phones the editing toolbar sits at the bottom of the screen, and scrolling never adds notes.
 
 
 Press **Edit** on a lick (or double-click the staff).
