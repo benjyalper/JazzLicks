@@ -213,6 +213,9 @@ function syncData() {
 function applySynced(data) {
   const before = new Map(state.phrases.map((p) => [p.id, JSON.stringify(p)]));
   const orderBefore = state.phrases.map((p) => p.id).join();
+  // Where each lick is listed (tab and group): if that changes the whole list is redrawn.
+  const placeOf = (list) => list.map((p) => `${p.id}:${categoryOf(p)}:${p.group || ''}`).join('|');
+  const placesBefore = placeOf(state.phrases);
   state.phrases = data.phrases;
   state.deleted = data.deleted;
   state.orderUpdatedAt = data.orderUpdatedAt;
@@ -220,7 +223,7 @@ function applySynced(data) {
   writeLocal();
   if (state.editingId && !byId(state.editingId)) { state.editingId = null; state.sel = null; }
   if (player.currentId && !byId(player.currentId)) player.stop();
-  if (state.phrases.map((p) => p.id).join() !== orderBefore) return renderAll();
+  if (state.phrases.map((p) => p.id).join() !== orderBefore || placeOf(state.phrases) !== placesBefore) return renderAll();
   for (const p of state.phrases) {
     if (before.get(p.id) === JSON.stringify(p)) continue;
     const ref = cards.get(p.id);
