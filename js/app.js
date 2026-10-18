@@ -332,27 +332,100 @@ function renderAll() {
         h('button', { class: 'btn primary', onclick: () => addPhrase() }, `+ ${cat.newTitle}`)));
     return;
   }
-  // Pieces without a group first, then each group under its own header.
-  for (const p of visible.filter((x) => !x.group)) list.append(buildCard(p));
-  const groups = [...new Set(visible.filter((x) => x.group).map((x) => x.group))];
-  for (const g of groups) {
-    const key = `${activeTab}:${g}`;
-    const members = visible.filter((x) => x.group === g);
-    const isOpen = q || !collapsed.has(key);
-    list.append(h('div', { class: 'group-head' },
-      h('button', { class: 'group-toggle', 'aria-expanded': isOpen ? 'true' : 'false', onclick: () => toggleGroup(key), dir: 'auto' },
-        h('span', { class: 'group-caret' }, isOpen ? '▾' : '▸'), g, h('span', { class: 'tab-count' }, String(members.length))),
-      h('button', { class: 'group-add', title: `New ${cat.newTitle.replace('New ', '')} in “${g}”`, 'aria-label': `Add to ${g}`, onclick: () => addPhrase(g) }, '+')));
-    if (isOpen) for (const p of members) list.append(buildCard(p));
-  }
+  // Pieces without a group first, then each group (and its subgroups) under its own header.
+  const renderNode = (node, depth) => {
+    for (const p of node.items) {
+      const card = buildCard(p);
+      if (depth) card.style.setProperty('--depth', depth);
+      list.append(card);
+    }
+    for (const child of node.children.values()) {
+      const key = `${activeTab}:${child.path}`;
+      const isOpen = q || !collapsed.has(key);
+      list.append(groupHeader(child, depth, isOpen, () => toggleGroup(key), cat));
+      if (isOpen) renderNode(child, depth + 1);
+    }
+  };
+  renderNode(groupTree(visible), 0);
   drawAllStaves();
+}
+
+// Groups can hold subgroups: a lick's group is a path like "Minor 251 › Bebop".
+const GROUP_SEP = ' › ';
+const groupParts = (g) => (g ? g.split(GROUP_SEP) : []);
+const cleanGroupName = (name) => name.replace(/›/g, '-').trim();
+
+function groupTree(phrases) {
+  const root = { path: '', name: '', items: [], children: new Map(), count: 0 };
+  for (const p of phrases) {
+    let node = root;
+    node.count++;
+    for (const part of groupParts(p.group)) {
+      if (!node.children.has(part)) {
+        const path = node.path ? node.path + GROUP_SEP + part : part;
+        node.children.set(part, { path, name: part, items: [], children: new Map(), count: 0 });
+      }
+      node = node.children.get(part);
+      node.count++;
+    }
+    node.items.push(p);
+  }
+  return root;
+}
+
+// Every group and subgroup of a tab, parents before children.
+function groupPaths(category) {
+  const out = [];
+  const walk = (node) => { for (const c of node.children.values()) { out.push(c.path); walk(c); } };
+  walk(groupTree(state.phrases.filter((x) => categoryOf(x) === category)));
+  return out;
+}
+
+function groupHeader(node, depth, isOpen, onToggle, cat) {
+  const kind = cat.newTitle.replace('New ', '');
+  const menu = h('details', { class: 'menu group-menu' },
+    h('summary', { 'aria-label': `${node.name} options`, title: 'Group options' }, '⋯'));
+  const item = (label, fn) => h('button', { onclick: () => { menu.open = false; fn(); } }, label);
+  menu.append(h('div', { class: 'menu-items' },
+    item(`New ${kind} here`, () => addPhrase(node.path)),
+    item('New subgroup…', () => {
+      const name = prompt(`Name of the new subgroup inside “${node.name}”:`, '');
+      if (name && cleanGroupName(name)) addPhrase(node.path + GROUP_SEP + cleanGroupName(name));
+    }),
+    item('Rename…', () => renameGroup(node.path))));
+  return h('div', { class: 'group-head', style: `--depth:${depth}` },
+    h('button', { class: 'group-toggle' + (depth ? ' sub' : ''), 'aria-expanded': isOpen ? 'true' : 'false', onclick: onToggle, dir: 'auto' },
+      h('span', { class: 'group-caret' }, isOpen ? '▾' : '▸'), node.name, h('span', { class: 'tab-count' }, String(node.count))),
+    h('button', { class: 'group-add', title: `New ${kind} in “${node.name}”`, 'aria-label': `Add to ${node.name}`, onclick: () => addPhrase(node.path) }, '+'),
+    menu);
+}
+
+function renameGroup(path) {
+  const parts = groupParts(path);
+  const old = parts[parts.length - 1];
+  const name = prompt(`Rename “${old}” to:`, old);
+  if (!name || !cleanGroupName(name) || cleanGroupName(name) === old) return;
+  const renamed = [...parts.slice(0, -1), cleanGroupName(name)].join(GROUP_SEP);
+  let n = 0;
+  for (const p of state.phrases) {
+    if (categoryOf(p) !== activeTab || !p.group) continue;
+    if (p.group === path) { p.group = renamed; n++; }
+    else if (p.group.startsWith(path + GROUP_SEP)) { p.group = renamed + p.group.slice(path.length); n++; }
+  }
+  // Keep collapsed groups collapsed under their new name.
+  const prefix = `${activeTab}:${path}`;
+  collapsed = new Set([...collapsed].map((k) => (k === prefix || k.startsWith(prefix + GROUP_SEP) ? `${activeTab}:${renamed}${k.slice(prefix.length)}` : k)));
+  try { localStorage.setItem(COLLAPSED_KEY, JSON.stringify([...collapsed])); } catch (e) { /* ignore */ }
+  save();
+  renderAll();
+  toast(`Renamed to “${cleanGroupName(name)}” (${n} item${n === 1 ? '' : 's'}).`);
 }
 
 // Group dialog: pick an existing group of this tab, type a new one, or none.
 function openGroupDialog(id) {
   const p = byId(id);
   if (!p) return;
-  const existing = [...new Set(state.phrases.filter((x) => categoryOf(x) === categoryOf(p) && x.group).map((x) => x.group))];
+  const existing = groupPaths(categoryOf(p));
   const back = h('div', { class: 'modal-backdrop', onclick: (e) => { if (e.target === back) back.remove(); } });
   const setGroup = (g) => {
     p.group = g || undefined;
@@ -362,14 +435,26 @@ function openGroupDialog(id) {
     renderAll();
     toast(g ? `Added to “${g}”.` : 'Removed from its group.');
   };
-  const input = h('input', { class: 'token-input', placeholder: 'New group name, e.g. Dorian', dir: 'auto', maxlength: 60 });
-  input.addEventListener('keydown', (e) => { if (e.key === 'Enter' && input.value.trim()) setGroup(input.value.trim()); });
+  const input = h('input', { class: 'token-input', placeholder: 'New group name, e.g. Minor 251', dir: 'auto', maxlength: 60 });
+  // A new group can go inside an existing one (a subgroup).
+  const parent = h('select', { class: 'group-parent', 'aria-label': 'Inside' },
+    h('option', { value: '' }, 'Top level'),
+    ...existing.map((g) => h('option', { value: g, selected: p.group === g }, `Inside: ${g}`)));
+  const create = () => {
+    const name = cleanGroupName(input.value);
+    if (name) setGroup(parent.value ? parent.value + GROUP_SEP + name : name);
+  };
+  input.addEventListener('keydown', (e) => { if (e.key === 'Enter') create(); });
   back.append(h('div', { class: 'modal', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Group' },
     h('button', { class: 'modal-close', 'aria-label': 'Close', onclick: () => back.remove() }, '×'),
     h('h2', {}, 'Group'),
     h('p', { dir: 'auto' }, `Put “${p.title}” in a group:`),
-    existing.length ? h('div', { class: 'group-choices' }, existing.map((g) => h('button', { class: 'btn' + (p.group === g ? ' primary' : ''), dir: 'auto', onclick: () => setGroup(g) }, g))) : null,
-    h('div', { class: 'token-row' }, input, h('button', { class: 'btn primary', onclick: () => input.value.trim() && setGroup(input.value.trim()) }, 'Add')),
+    existing.length ? h('div', { class: 'group-choices tree' }, existing.map((g) => h('button', {
+      class: 'btn' + (p.group === g ? ' primary' : ''), dir: 'auto', style: `--depth:${groupParts(g).length - 1}`, onclick: () => setGroup(g),
+    }, groupParts(g).pop()))) : null,
+    h('p', { class: 'muted' }, 'Or make a new group:'),
+    existing.length ? parent : null,
+    h('div', { class: 'token-row' }, input, h('button', { class: 'btn primary', onclick: create }, 'Add')),
     p.group ? h('div', { class: 'modal-actions' }, h('button', { class: 'btn danger-btn', onclick: () => setGroup(null) }, 'Remove from group')) : null));
   document.body.append(back);
   if (!existing.length) input.focus();

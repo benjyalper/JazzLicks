@@ -109,6 +109,18 @@ button:disabled { cursor: default; opacity: 0.35; }
 }
 .group-add:hover { border-color: var(--ink-soft); color: var(--ink); }
 .group-choices { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0; }
+/* Subgroups: indented headers and cards */
+.group-head { margin-left: calc(var(--depth, 0) * 18px); }
+.group-toggle.sub { font-size: 17px; }
+.lick { margin-left: calc(var(--depth, 0) * 18px); }
+.group-menu summary { width: 30px; height: 30px; font-size: 17px; color: var(--ink-soft); }
+.group-menu .menu-items { left: 0; right: auto; top: 34px; min-width: 170px; }
+.group-choices.tree { flex-direction: column; align-items: flex-start; flex-wrap: nowrap; max-height: 40vh; overflow-y: auto; }
+.group-choices.tree .btn { margin-left: calc(var(--depth, 0) * 18px); }
+.group-parent { width: 100%; margin-bottom: 8px; padding: 7px 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); font: inherit; }
+@media (max-width: 600px) {
+  .group-head, .lick, .group-choices.tree .btn { margin-left: calc(var(--depth, 0) * 8px); }
+}
 .tab {
   border: 1px solid var(--line);
   background: var(--card);
