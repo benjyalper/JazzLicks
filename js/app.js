@@ -92,6 +92,7 @@ function renderTabs() {
       onclick: () => setTab(c.id),
     }, c.label, h('span', { class: 'tab-count' }, String(count))));
   }
+  renderGroupPicker();
   const cat = CATEGORIES.find((c) => c.id === activeTab);
   $('#new-lick').innerHTML = `+ New<span class="long"> ${cat.newTitle.replace('New ', '')}</span>`;
 }
@@ -315,6 +316,46 @@ function toggleGroup(key) {
   renderAll();
 }
 
+// Which group each tab is showing ('' = everything, NO_GROUP = pieces not in a group).
+const GROUP_VIEW_KEY = 'jazzlicks.groupView';
+const NO_GROUP = '\u0000none';
+let groupViews = {};
+try { groupViews = JSON.parse(localStorage.getItem(GROUP_VIEW_KEY)) || {}; } catch (e) { /* ignore */ }
+
+function groupView() {
+  const v = groupViews[activeTab] || '';
+  if (!v) return v;
+  if (v === NO_GROUP) return state.phrases.some((p) => categoryOf(p) === activeTab && !p.group) ? v : '';
+  return groupPaths(activeTab).includes(v) ? v : ''; // that group no longer exists
+}
+
+function setGroupView(v) {
+  groupViews[activeTab] = v;
+  try { localStorage.setItem(GROUP_VIEW_KEY, JSON.stringify(groupViews)); } catch (e) { /* ignore */ }
+  renderAll();
+  window.scrollTo({ top: 0 });
+}
+
+const inView = (p, v) => !v || (v === NO_GROUP ? !p.group : !!p.group && (p.group === v || p.group.startsWith(v + GROUP_SEP)));
+
+function renderGroupPicker() {
+  const sel = $('#group-view');
+  const paths = groupPaths(activeTab);
+  sel.hidden = !paths.length;
+  sel.innerHTML = '';
+  if (!paths.length) return;
+  const v = groupView();
+  const ungrouped = state.phrases.some((p) => categoryOf(p) === activeTab && !p.group);
+  sel.append(
+    h('option', { value: '', selected: v === '' }, 'All groups'),
+    ...paths.map((g) => {
+      const parts = groupParts(g);
+      return h('option', { value: g, selected: v === g }, '\u00a0\u00a0\u00a0'.repeat(parts.length - 1) + parts[parts.length - 1]);
+    }),
+    ungrouped ? h('option', { value: NO_GROUP, selected: v === NO_GROUP }, 'Not in a group') : null);
+  sel.classList.toggle('on', !!v);
+}
+
 const matches = (p, q) => !q || `${p.title || ''} ${p.text || ''} ${p.group || ''}`.toLowerCase().includes(q);
 
 function renderAll() {
@@ -325,7 +366,8 @@ function renderAll() {
   document.body.classList.toggle('is-editing', !!state.editingId);
   const q = searchQuery.trim().toLowerCase();
   const inTab = state.phrases.filter((p) => categoryOf(p) === activeTab);
-  const visible = inTab.filter((p) => matches(p, q));
+  const view = groupView();
+  const visible = inTab.filter((p) => matches(p, q) && inView(p, view));
   const cat = CATEGORIES.find((c) => c.id === activeTab);
   if (!visible.length) {
     list.append(q
@@ -344,7 +386,8 @@ function renderAll() {
     }
     for (const child of node.children.values()) {
       const key = `${activeTab}:${child.path}`;
-      const isOpen = q || !collapsed.has(key);
+      // The group picked in the picker (and the groups around it) is always open.
+      const isOpen = q || !collapsed.has(key) || (view && view !== NO_GROUP && (view === child.path || view.startsWith(child.path + GROUP_SEP)));
       list.append(groupHeader(child, depth, isOpen, () => toggleGroup(key), cat));
       if (isOpen) renderNode(child, depth + 1);
     }
@@ -390,6 +433,7 @@ function groupHeader(node, depth, isOpen, onToggle, cat) {
     h('summary', { 'aria-label': `${node.name} options`, title: 'Group options' }, '⋯'));
   const item = (label, fn) => h('button', { onclick: () => { menu.open = false; fn(); } }, label);
   menu.append(h('div', { class: 'menu-items' },
+    item('Show only this group', () => setGroupView(node.path)),
     item(`New ${kind} here`, () => addPhrase(node.path)),
     item('New subgroup…', () => {
       const name = prompt(`Name of the new subgroup inside “${node.name}”:`, '');
@@ -2032,6 +2076,7 @@ function setEditing(id) {
 function addPhrase(group) {
   const p = newPhrase(activeTab);
   if (typeof group === 'string') p.group = group;
+  else if (groupView() && groupView() !== NO_GROUP) p.group = groupView(); // + New while viewing a group
   if (searchQuery) { searchQuery = ''; $('#search').value = ''; }
   state.phrases.unshift(p);
   save();
@@ -2358,6 +2403,7 @@ function boot() {
   backupOnce();
   load();
   $('#new-lick').addEventListener('click', () => addPhrase());
+  $('#group-view').addEventListener('change', (e) => setGroupView(e.target.value));
   const search = $('#search');
   let searchTimer = null;
   search.addEventListener('input', () => {

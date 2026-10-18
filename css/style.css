@@ -90,6 +90,19 @@ button:disabled { cursor: default; opacity: 0.35; }
   padding: 7px 14px;
 }
 .search:focus { outline: none; border-color: var(--ink-soft); }
+.group-view {
+  margin-left: auto;
+  max-width: 220px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--card);
+  padding: 7px 12px;
+  font: inherit;
+  color: var(--ink);
+}
+.group-view.on { background: var(--ink); color: #fff; border-color: var(--ink); }
+.group-view:not([hidden]) + .search { margin-left: 0; }
+.group-view[hidden] { display: none; }
 
 .group-head { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
 .group-toggle {
@@ -500,6 +513,7 @@ button:disabled { cursor: default; opacity: 0.35; }
   .licks { padding: 14px 10px 8px; }
   .tabs { padding: 12px 10px 0; }
   .search { width: 100%; margin-left: 0; }
+  .group-view { margin-left: 0; max-width: none; width: 100%; }
   .tab { padding: 6px 11px; font-size: 14px; }
   .lick { padding: 12px 10px 14px; }
   .settings { padding-left: 0; }
