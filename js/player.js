@@ -101,31 +101,22 @@ function loadKit() {
       const shakerFilter = new Tone.Filter({ frequency: 6500, type: 'bandpass', Q: 0.8 }).connect(out);
       const shaker = new Tone.NoiseSynth({
         noise: { type: 'white' },
-        // Sharp attack, then the "shh" carries on (at a lower level) until the next shake.
-        envelope: { attack: 0.005, decay: 0.03, sustain: 0.18, release: 0.02 },
-        volume: -17,
+        envelope: { attack: 0.006, decay: 0.05, sustain: 0, release: 0.02 },
+        volume: -14,
       }).connect(shakerFilter);
-      // The 3rd sixteenth of each beat: the same shake, a little brighter.
-      const shakerHiFilter = new Tone.Filter({ frequency: 9500, type: 'bandpass', Q: 0.9 }).connect(out);
-      const shakerHi = new Tone.NoiseSynth({
-        noise: { type: 'white' },
-        envelope: { attack: 0.005, decay: 0.03, sustain: 0.18, release: 0.02 },
-        volume: -17,
-      }).connect(shakerHiFilter);
       const samples = new Tone.Sampler({
         urls: { C1: 'acoustic-kit/kick.mp3', D1: 'acoustic-kit/snare.mp3', 'F#1': 'acoustic-kit/hihat.mp3', A1: '../berklee/shaker_1.mp3' },
         baseUrl: 'https://tonejs.github.io/audio/drum-samples/',
         release: 0.4,
         onload: () => resolve({
-          play(sound, time, vel, dur) {
+          play(sound, time, vel) {
             if (sound === 'ride') ride.triggerAttackRelease(320, 0.9, time, vel);
             else if (sound === 'stick') stick.triggerAttackRelease('A5', 0.05, time, vel);
             else if (sound === 'clave') {
               claveTone.triggerAttackRelease(1650, 0.06, time, vel);
               claveWood.triggerAttackRelease(4300, 0.02, time, vel);
               claveClick.triggerAttackRelease(0.004, time, vel);
-            } else if (sound === 'shaker') shaker.triggerAttackRelease(dur || 0.03, time, vel);
-            else if (sound === 'shakerHi') shakerHi.triggerAttackRelease(dur || 0.03, time, vel);
+            } else if (sound === 'shaker') shaker.triggerAttackRelease(0.03, time, vel);
             else samples.triggerAttackRelease({ kick: 'C1', snare: 'D1', hihat: 'F#1', shaker: 'A1' }[sound], 0.6, time, vel);
           },
           stop() { samples.releaseAll(); },
@@ -291,7 +282,7 @@ export function buildEvents(phrase) {
   if (bass || drums || chords === 'comp') {
     // Rhythm section: comping chords, bass line, drums.
     for (const ev of buildBacking(phrase, { bass, drums, comp: chords === 'comp' })) {
-      if (ev.kind === 'drum') events.push({ kind: 'drum', time: sec(ev.tick), sound: ev.sound, vel: ev.vel, dur: ev.dur ? span(ev.tick, ev.dur) : undefined });
+      if (ev.kind === 'drum') events.push({ kind: 'drum', time: sec(ev.tick), sound: ev.sound, vel: ev.vel });
       else if (ev.kind === 'gtr') events.push({ kind: 'gtr', time: sec(ev.tick), dur: span(ev.tick, ev.dur), notes: ev.notes.map(noteName), vel: ev.vel });
       else if (ev.kind === 'bass') events.push({ kind: 'bass', time: sec(ev.tick), dur: span(ev.tick, ev.dur), notes: [noteName(ev.midi)], vel: ev.vel });
       else events.push({ kind: 'chord', time: sec(ev.tick), dur: span(ev.tick, ev.dur), notes: ev.notes.map(noteName), vel: ev.vel });
@@ -433,7 +424,7 @@ class Player {
         } else if (ev.kind === 'bass') {
           if (bass) bass.triggerAttackRelease(ev.notes, ev.dur, time, ev.vel);
         } else if (ev.kind === 'drum') {
-          if (kit) kit.play(ev.sound, time, ev.vel, ev.dur);
+          if (kit) kit.play(ev.sound, time, ev.vel);
         }
         if (ev.m !== undefined) Tone.getDraw().schedule(() => this.hooks && this.hooks.onNote(ev.m, ev.i), time);
       }, ev.time);
