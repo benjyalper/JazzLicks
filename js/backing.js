@@ -33,9 +33,9 @@ function intervals(chord) {
 }
 
 // Place a pitch class in the bass register, as close as possible to `near`.
-function bassNote(pc, near) {
+function bassNote(pc, near, low = BASS_LOW, high = BASS_HIGH) {
   let best = null;
-  for (let m = BASS_LOW; m <= BASS_HIGH; m++) {
+  for (let m = low; m <= high; m++) {
     if (((m % 12) + 12) % 12 !== ((pc % 12) + 12) % 12) continue;
     if (best === null || Math.abs(m - near) < Math.abs(best - near)) best = m;
   }
@@ -92,28 +92,33 @@ function walkingBass(phrase, list) {
 
 // Bossa nova bass: the chord's root on beat 1, its fifth (above or below,
 // whichever is closer) on beat 3. If the chord changes on beat 3, the new root.
+// Kept in E2–G3, where phone and laptop speakers can still carry it under the
+// shaker and clave.
+const BOSSA_LOW = 40; // E2
+const BOSSA_HIGH = 55; // G3
+
 function bossaBass(phrase, list) {
   const events = [];
-  let prev = 38;
+  let prev = 45; // around A2
   phrase.measures.forEach((_, m) => {
     const t = m * MEASURE_TICKS;
     const ch1 = chordAt(list, t);
     const ch3 = chordAt(list, t + 48);
     if (ch1) {
-      const midi = bassNote(rootPc(ch1.root), prev);
-      events.push({ kind: 'bass', tick: t, dur: 44, midi, vel: 0.85 });
+      const midi = bassNote(rootPc(ch1.root), prev, BOSSA_LOW, BOSSA_HIGH);
+      events.push({ kind: 'bass', tick: t, dur: 46, midi, vel: 1 });
       prev = midi;
     }
     if (ch3) {
       const changes = ch3 !== ch1;
-      const root = changes ? bassNote(rootPc(ch3.root), prev) : prev;
+      const root = changes ? bassNote(rootPc(ch3.root), prev, BOSSA_LOW, BOSSA_HIGH) : prev;
       let midi = root;
       if (!changes) {
         const up = root + 7;
         const down = root - 5;
-        midi = down < BASS_LOW ? up : up > BASS_HIGH ? down : Math.abs(up - prev) < Math.abs(down - prev) ? up : down;
+        midi = down < BOSSA_LOW ? up : up > BOSSA_HIGH ? down : Math.abs(up - prev) < Math.abs(down - prev) ? up : down;
       }
-      events.push({ kind: 'bass', tick: t + 48, dur: 44, midi, vel: changes ? 0.85 : 0.75 });
+      events.push({ kind: 'bass', tick: t + 48, dur: 46, midi, vel: changes ? 1 : 0.92 });
       prev = midi;
     }
   });

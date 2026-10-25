@@ -400,6 +400,8 @@ class Player {
     if (this.currentId !== phrase.id || this.state !== 'loading') return; // cancelled meanwhile
     this.sampler = sampler;
     this.bass = bass;
+    // Bossa's bass plays only two notes a bar under shaker and clave: give it more level.
+    if (bass) bass.volume.value = phrase.style === 'latin' ? 8 : 3;
     this.kit = kit;
     this.gtr = gtr;
     const def = INSTRUMENTS[phrase.instrument] || INSTRUMENTS.piano;
