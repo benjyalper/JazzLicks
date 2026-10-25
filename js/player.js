@@ -102,15 +102,15 @@ function loadKit() {
       const shaker = new Tone.NoiseSynth({
         noise: { type: 'white' },
         // Sharp attack, then the "shh" carries on (at a lower level) until the next shake.
-        envelope: { attack: 0.005, decay: 0.035, sustain: 0.32, release: 0.03 },
-        volume: -18,
+        envelope: { attack: 0.005, decay: 0.03, sustain: 0.18, release: 0.02 },
+        volume: -17,
       }).connect(shakerFilter);
       // The 3rd sixteenth of each beat: the same shake, a little brighter.
       const shakerHiFilter = new Tone.Filter({ frequency: 9500, type: 'bandpass', Q: 0.9 }).connect(out);
       const shakerHi = new Tone.NoiseSynth({
         noise: { type: 'white' },
-        envelope: { attack: 0.005, decay: 0.035, sustain: 0.32, release: 0.03 },
-        volume: -18,
+        envelope: { attack: 0.005, decay: 0.03, sustain: 0.18, release: 0.02 },
+        volume: -17,
       }).connect(shakerHiFilter);
       const samples = new Tone.Sampler({
         urls: { C1: 'acoustic-kit/kick.mp3', D1: 'acoustic-kit/snare.mp3', 'F#1': 'acoustic-kit/hihat.mp3', A1: '../berklee/shaker_1.mp3' },

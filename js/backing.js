@@ -148,13 +148,13 @@ function swingDrums(measures) {
 
 // Bossa nova percussion: a swung shaker and a wooden clave on sixteenths
 // 1, 4, 7, 10 and 13. The shaker plays each beat as dotted 16th + 32nd, dotted
-// 16th + 32nd; every shake lasts until the next one. The 1st of the four is a
+// 16th + 32nd; each shake carries on briefly (about half its length). The 1st of the four is a
 // touch stronger than the 2nd and 4th, the 3rd brighter and stronger again.
 const SHAKER_BEAT = [
-  { at: 0, dur: 9, sound: 'shaker', vel: 0.56 },
-  { at: 9, dur: 3, sound: 'shaker', vel: 0.5 },
-  { at: 12, dur: 9, sound: 'shakerHi', vel: 0.74 },
-  { at: 21, dur: 3, sound: 'shaker', vel: 0.5 },
+  { at: 0, dur: 5, sound: 'shaker', vel: 0.56 },
+  { at: 9, dur: 2, sound: 'shaker', vel: 0.5 },
+  { at: 12, dur: 5, sound: 'shakerHi', vel: 0.74 },
+  { at: 21, dur: 2, sound: 'shaker', vel: 0.5 },
 ];
 const BOSSA_CLAVE = [0, 3, 6, 9, 12]; // sixteenth-note positions (0-based) in every bar
 
