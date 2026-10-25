@@ -146,15 +146,22 @@ function swingDrums(measures) {
   return ev;
 }
 
-// Bossa nova percussion: shaker in sixteenths (the first of each group of four
-// slightly stronger) and a wooden clave on sixteenths 1, 4, 7, 10 and 13.
+// Bossa nova percussion: shaker in sixteenths and a wooden clave on sixteenths
+// 1, 4, 7, 10 and 13. In each beat's four shakes the 1st is a touch stronger
+// than the 2nd and 4th, and the 3rd is brighter and stronger again.
+const SHAKER_BEAT = [
+  { sound: 'shaker', vel: 0.56 },
+  { sound: 'shaker', vel: 0.5 },
+  { sound: 'shakerHi', vel: 0.64 },
+  { sound: 'shaker', vel: 0.5 },
+];
 const BOSSA_CLAVE = [0, 3, 6, 9, 12]; // sixteenth-note positions (0-based) in every bar
 
 function latinDrums(measures) {
   const ev = [];
   for (let m = 0; m < measures; m++) {
     const t = m * MEASURE_TICKS;
-    for (let s16 = 0; s16 < 16; s16++) ev.push({ kind: 'drum', sound: 'shaker', tick: t + s16 * 6, vel: s16 % 4 === 0 ? 0.62 : 0.5 });
+    for (let s16 = 0; s16 < 16; s16++) ev.push({ kind: 'drum', ...SHAKER_BEAT[s16 % 4], tick: t + s16 * 6 });
     for (const s16 of BOSSA_CLAVE) ev.push({ kind: 'drum', sound: 'clave', tick: t + s16 * 6, vel: 0.8 });
   }
   return ev;
@@ -189,10 +196,10 @@ function bossaVoicing(chord) {
   return notes.sort((a, b) => a - b);
 }
 
-// Bossa comping (on the lick's piano or guitar): the chord sounds on
-// sixteenths 2, 5, 9 and 12 of every bar. When the bass is switched off, a
-// thumb bass note on beats 1 and 3 keeps the root underneath.
-const BOSSA_COMP = [1, 4, 8, 11]; // sixteenth-note positions (0-based) in every bar
+// Bossa comping (on the lick's piano or guitar): the chord sounds for an
+// eighth note on sixteenths 2, 5, 8, 11, 14 and 16 of every bar. When the bass
+// is switched off, a thumb bass note on beats 1 and 3 keeps the root underneath.
+const BOSSA_COMP = [1, 4, 7, 10, 13, 15]; // sixteenth-note positions (0-based) in every bar
 
 function bossaGuitar(phrase, list, withBass) {
   const ev = [];
@@ -211,8 +218,8 @@ function bossaGuitar(phrase, list, withBass) {
     BOSSA_COMP.forEach((s16, k) => {
       const tick = t + s16 * 6;
       const ch = chordAt(list, tick);
-      const next = k + 1 < BOSSA_COMP.length ? BOSSA_COMP[k + 1] * 6 : MEASURE_TICKS;
-      if (ch) ev.push({ kind: 'gtr', tick, dur: Math.min(next - s16 * 6, 16), notes: bossaVoicing(ch), vel: 0.42 });
+      const next = k + 1 < BOSSA_COMP.length ? BOSSA_COMP[k + 1] * 6 : MEASURE_TICKS + BOSSA_COMP[0] * 6;
+      if (ch) ev.push({ kind: 'gtr', tick, dur: Math.min(next - s16 * 6, 12), notes: bossaVoicing(ch), vel: 0.42 });
     });
   });
   return ev;

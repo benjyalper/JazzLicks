@@ -104,6 +104,13 @@ function loadKit() {
         envelope: { attack: 0.006, decay: 0.05, sustain: 0, release: 0.02 },
         volume: -14,
       }).connect(shakerFilter);
+      // The 3rd sixteenth of each beat: the same shake, a little brighter.
+      const shakerHiFilter = new Tone.Filter({ frequency: 9500, type: 'bandpass', Q: 0.9 }).connect(out);
+      const shakerHi = new Tone.NoiseSynth({
+        noise: { type: 'white' },
+        envelope: { attack: 0.005, decay: 0.045, sustain: 0, release: 0.02 },
+        volume: -14,
+      }).connect(shakerHiFilter);
       const samples = new Tone.Sampler({
         urls: { C1: 'acoustic-kit/kick.mp3', D1: 'acoustic-kit/snare.mp3', 'F#1': 'acoustic-kit/hihat.mp3', A1: '../berklee/shaker_1.mp3' },
         baseUrl: 'https://tonejs.github.io/audio/drum-samples/',
@@ -117,6 +124,7 @@ function loadKit() {
               claveWood.triggerAttackRelease(4300, 0.02, time, vel);
               claveClick.triggerAttackRelease(0.004, time, vel);
             } else if (sound === 'shaker') shaker.triggerAttackRelease(0.03, time, vel);
+            else if (sound === 'shakerHi') shakerHi.triggerAttackRelease(0.03, time, vel);
             else samples.triggerAttackRelease({ kick: 'C1', snare: 'D1', hihat: 'F#1', shaker: 'A1' }[sound], 0.6, time, vel);
           },
           stop() { samples.releaseAll(); },
