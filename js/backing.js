@@ -146,14 +146,15 @@ function swingDrums(measures) {
   return ev;
 }
 
-// Bossa nova percussion: shaker in sixteenths and a wooden clave on sixteenths
-// 1, 4, 7, 10 and 13. In each beat's four shakes the 1st is a touch stronger
-// than the 2nd and 4th, and the 3rd is brighter and stronger again.
+// Bossa nova percussion: a swung shaker and a wooden clave on sixteenths
+// 1, 4, 7, 10 and 13. The shaker plays each beat as dotted 16th + 32nd, dotted
+// 16th + 32nd; every shake lasts until the next one. The 1st of the four is a
+// touch stronger than the 2nd and 4th, the 3rd brighter and stronger again.
 const SHAKER_BEAT = [
-  { sound: 'shaker', vel: 0.56 },
-  { sound: 'shaker', vel: 0.5 },
-  { sound: 'shakerHi', vel: 0.64 },
-  { sound: 'shaker', vel: 0.5 },
+  { at: 0, dur: 9, sound: 'shaker', vel: 0.56 },
+  { at: 9, dur: 3, sound: 'shaker', vel: 0.5 },
+  { at: 12, dur: 9, sound: 'shakerHi', vel: 0.74 },
+  { at: 21, dur: 3, sound: 'shaker', vel: 0.5 },
 ];
 const BOSSA_CLAVE = [0, 3, 6, 9, 12]; // sixteenth-note positions (0-based) in every bar
 
@@ -161,7 +162,9 @@ function latinDrums(measures) {
   const ev = [];
   for (let m = 0; m < measures; m++) {
     const t = m * MEASURE_TICKS;
-    for (let s16 = 0; s16 < 16; s16++) ev.push({ kind: 'drum', ...SHAKER_BEAT[s16 % 4], tick: t + s16 * 6 });
+    for (let beat = 0; beat < 4; beat++) {
+      for (const s of SHAKER_BEAT) ev.push({ kind: 'drum', sound: s.sound, vel: s.vel, tick: t + beat * 24 + s.at, dur: s.dur });
+    }
     for (const s16 of BOSSA_CLAVE) ev.push({ kind: 'drum', sound: 'clave', tick: t + s16 * 6, vel: 0.8 });
   }
   return ev;
