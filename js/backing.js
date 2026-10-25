@@ -206,6 +206,7 @@ const BOSSA_COMP = [1, 4, 7, 10, 13, 15]; // sixteenth-note positions (0-based) 
 
 function bossaGuitar(phrase, list, withBass) {
   const ev = [];
+  const total = phrase.measures.length * MEASURE_TICKS;
   phrase.measures.forEach((_, m) => {
     const t = m * MEASURE_TICKS;
     if (!withBass) {
@@ -220,7 +221,13 @@ function bossaGuitar(phrase, list, withBass) {
     }
     BOSSA_COMP.forEach((s16, k) => {
       const tick = t + s16 * 6;
-      const ch = chordAt(list, tick);
+      // A hit that rings over a chord change (16th 8 into beat 3, 16th 16 into
+      // the next bar) anticipates the coming chord, as in real bossa comping.
+      let ch = chordAt(list, tick);
+      const into = tick + 6;
+      const changes = list.find((c) => c.tick === into);
+      if (changes) ch = changes.chord;
+      else if (into >= total && phrase.loop && list.length && list[0].tick === 0) ch = list[0].chord;
       const next = k + 1 < BOSSA_COMP.length ? BOSSA_COMP[k + 1] * 6 : MEASURE_TICKS + BOSSA_COMP[0] * 6;
       if (ch) ev.push({ kind: 'gtr', tick, dur: Math.min(next - s16 * 6, 12), notes: bossaVoicing(ch), vel: 0.42 });
     });
