@@ -34,6 +34,25 @@ const entry = (id, group, title, keySig, spec, text, extra = {}) => ({
   ...extra,
 });
 
+// A few short examples entered from the book as a start ("C5" = C in octave
+// 5, "Bb5"/"An5" = flat / natural; durations 8 = eighth, q = quarter, h = half).
+function line(spec) {
+  return spec.split('|').map((bar) => bar.trim().split(/\s+/).map((t) => {
+    const m = t.match(/^([A-G])(b|#|n)?(\d)\/(8|q|h)$/);
+    return { rest: false, step: m[1], alter: m[2] === 'b' ? -1 : m[2] === '#' ? 1 : 0, oct: Number(m[3]), dur: m[4], dots: 0, tie: false };
+  }));
+}
+const NOTES = {
+  'galbraith-fw-ex1-cmaj': line('D5/8 B4/8 C5/8 D5/8 B4/8 G4/8 A4/8 B4/8 | G4/8 E4/8 D4/8 C4/8 B3/8 G3/8 A3/q'),
+  'galbraith-fw-ex1-ebmaj': line('Bb5/8 An5/8 Ab5/8 G5/8 F5/8 Eb5/8 D5/8 C5/8 | Bn4/8 D5/8 F5/8 Ab5/8 G5/h'),
+  'galbraith-fw-ex2-cmaj': line('C4/8 E4/8 G4/8 B4/8 D5/8 B4/8 C5/8 D5/8 | E5/8 F5/8 G5/8 A5/8 B5/8 C6/8 D6/8 E6/8 | G5/h'),
+};
+const withNotes = (p) => {
+  const notes = NOTES[p.id];
+  if (notes) notes.forEach((bar, k) => { if (p.measures[k]) p.measures[k].notes = bar.map((n) => ({ ...n })); });
+  return p;
+};
+
 const EX = 'Fingering examples';
 const MAJ = 'II–V–I major';
 const MIN = 'II–V–I minor';
@@ -43,14 +62,14 @@ const todo = 'Enter the notes from the book.';
 function workbook() {
   return [
     // Fingering concepts (pp. 4–8). Chords are simplified to the app's four types.
-    entry('ex1-cmaj', EX, 'Ex. 1 – Second position (Cmaj9)', 'C', 'Cmaj7 | -', `p. 4. One finger per fret, no shifting. ${todo}`),
-    entry('ex1-ebmaj', EX, 'Ex. 1 – Third position (E♭maj)', 'Eb', 'Ebmaj7 | -', `p. 4. ${todo}`),
+    entry('ex1-cmaj', EX, 'Ex. 1 – Second position (Cmaj9)', 'C', 'Cmaj7 | -', 'p. 4. One finger per fret, no shifting. Notes entered from the book; the fingering is in the book.'),
+    entry('ex1-ebmaj', EX, 'Ex. 1 – Third position (E♭maj)', 'Eb', 'Ebmaj7 | -', 'p. 4. Notes entered from the book; the fingering is in the book.'),
     entry('ex1a-cmaj', EX, 'Ex. 1a – One-fret slide (Cmaj)', 'C', 'Cmaj7 | -', `p. 4. Extending the position with a 1st- or 4th-finger slide. ${todo}`),
     entry('ex1a-ebmaj', EX, 'Ex. 1a – One-fret slide (E♭maj)', 'Eb', 'Ebmaj7 | -', `p. 4. ${todo}`),
     entry('ex1a-f7', EX, 'Ex. 1a – One-fret slide (F7)', 'F', 'F7 | -', `p. 4. ${todo}`),
     entry('ex1a-gm7', EX, 'Ex. 1a – One-fret slide (Gm7 – C7♭9)', 'F', 'Gm7 | C7', `p. 4. C7♭9 in the book. ${todo}`),
     entry('ex2-ebmaj', EX, 'Ex. 2 – Extended fingering + slides (E♭maj)', 'Eb', 'Ebmaj7 | - | -', `p. 5. ${todo}`),
-    entry('ex2-cmaj', EX, 'Ex. 2 – Extended fingering + slides (Cmaj)', 'C', 'Cmaj7 | - | -', `p. 5. ${todo}`),
+    entry('ex2-cmaj', EX, 'Ex. 2 – Extended fingering + slides (Cmaj)', 'C', 'Cmaj7 | - | -', 'p. 5. Notes entered from the book; the slides and fingering are in the book.'),
     entry('ex3-gmaj', EX, 'Ex. 3 – Skips with the 1st finger (Gmaj)', 'G', 'Gmaj7 | -', `p. 5. ${todo}`),
     entry('ex3-am11', EX, 'Ex. 3 – Skips with the 1st finger (Am11)', 'C', 'Am7 | -', `p. 5. Am11 in the book. ${todo}`),
     entry('ex3-dbmaj', EX, 'Ex. 3 – Skips with the 1st finger (D♭maj9)', 'Db', 'Dbmaj7 | -', `p. 5. ${todo}`),
@@ -112,7 +131,26 @@ export function seedCats(state) {
   const have = new Set(state.phrases.map((p) => p.id));
   for (const p of workbook()) {
     if (have.has(p.id) || state.deleted[p.id]) continue;
-    state.phrases.push(p);
+    state.phrases.push(withNotes(p));
+    changed = true;
+  }
+  return changed;
+}
+
+/** Second step: put the example notes into entries made before they existed,
+ *  if those entries are still empty. */
+export function seedCatsNotes(state) {
+  const KEY = 'jazzlicks.seed.cats.notes';
+  try {
+    if (localStorage.getItem(KEY)) return false;
+    localStorage.setItem(KEY, String(Date.now()));
+  } catch (e) {
+    return false;
+  }
+  let changed = false;
+  for (const p of state.phrases) {
+    if (!NOTES[p.id] || p.measures.some((m) => m.notes.length)) continue;
+    withNotes(p);
     changed = true;
   }
   return changed;
