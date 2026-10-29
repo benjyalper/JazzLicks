@@ -33,7 +33,9 @@ Copied notes and bars stay available in this browser, so you can paste them into
 
 ## Tabs
 
-Pieces are grouped into **Licks**, **Scales** and **Minus 1** (chords only, for playing along). Older pieces are sorted automatically (no notes → Minus 1, Hebrew name → Licks, otherwise Scales); use **⋯ → Move to** to put anything elsewhere.
+Pieces are grouped into **Licks**, **Scales**, **Minus 1** and **Cats** (lines by artist, e.g. Cats › Coleman Hawkins, Cats › Barry Galbraith) (chords only, for playing along). Older pieces are sorted automatically (no notes → Minus 1, Hebrew name → Licks, otherwise Scales); use **⋯ → Move to** to put anything elsewhere.
+
+The Cats tab starts with an index of Barry Galbraith's *The Fingerboard Workbook* (fingering examples, II–V–I major and minor in all keys, and the standard progression): each entry has the key, chord changes and length, and the notes are entered from your own copy of the book.
 
 ## Editing
 

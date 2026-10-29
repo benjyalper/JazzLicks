@@ -7,6 +7,7 @@ import { renderPhrase, hitTest, ghostAt, noteElement, diatonicUnder, pointAt } f
 import { player, previewNote, warmUp } from './player.js';
 import { STYLES } from './backing.js';
 import { initSync, notifyChange, connect, disconnect, syncNow, syncInfo } from './sync.js';
+import { seedCats } from './seed.js';
 
 const STORAGE_KEY = 'jazzlicks.v1';
 const MAX_MEASURES = 8;
@@ -49,6 +50,7 @@ const CATEGORIES = [
   { id: 'licks', label: 'Licks', newTitle: 'New lick', empty: 'No licks yet.' },
   { id: 'scales', label: 'Scales', newTitle: 'New scale', empty: 'No scales yet.' },
   { id: 'minus1', label: 'Minus 1', newTitle: 'New track', empty: 'No Minus 1 tracks yet (chords only, no notes).' },
+  { id: 'cats', label: 'Cats', newTitle: 'New line', empty: 'No lines from the cats yet. Group them by artist with ⋯ → Group….' },
 ];
 const TAB_KEY = 'jazzlicks.tab';
 const HEBREW = /[\u0590-\u05FF]/;
@@ -2402,6 +2404,7 @@ document.addEventListener('keydown', (e) => {
 function boot() {
   backupOnce();
   load();
+  if (seedCats(state)) save();
   $('#new-lick').addEventListener('click', () => addPhrase());
   $('#group-view').addEventListener('change', (e) => setGroupView(e.target.value));
   const search = $('#search');
