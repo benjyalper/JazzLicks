@@ -137,6 +137,49 @@ export function seedCats(state) {
   return changed;
 }
 
+// Original practice lines (not from the book) over the same progressions.
+const ORIGINAL = 'Practice lines (original)';
+const original = (id, title, keySig, spec, notes, text) => {
+  const p = entry(id, '', title, keySig, spec, text, { chords: 'comp', bass: true, drums: true });
+  p.id = `original-${id}`;
+  p.group = ORIGINAL;
+  line(notes).forEach((bar, k) => { if (p.measures[k]) p.measures[k].notes = bar; });
+  return p;
+};
+
+function originals() {
+  return [
+    original('251-major-c', 'II–V–I major in C – practice line', 'C', 'Dm7 | G7 | Cmaj7 | -',
+      'D4/8 F4/8 A4/8 C5/8 E5/8 D5/8 C5/8 A4/8 | B4/8 D5/8 F5/8 E5/8 D5/8 C5/8 B4/8 Ab4/8 | G4/8 C5/8 E5/8 G5/8 B5/8 A5/8 G5/8 E5/8 | D5/8 B4/8 C5/h',
+      'An original line: Dm7 arpeggio up to the 9th, G7 with a ♭9 (A♭) leading into the 5th of C.'),
+    original('251-minor-d', 'II–V–I minor in D – practice line', 'F', 'Em7b5 | A7 | Dm7 | -',
+      'E4/8 G4/8 Bb4/8 D5/8 F5/8 E5/8 D5/8 Bb4/8 | A4/8 C#5/8 E5/8 G5/8 Bb5/8 G5/8 E5/8 C#5/8 | D5/8 A4/8 F4/8 D4/8 E4/8 F4/8 G4/8 A4/8 | D5/h',
+      'An original line: Eø arpeggio, A7 with the ♭9 (B♭) on top, resolving to D minor.'),
+    original('standard-1-8', 'Standard progression bars 1–8 – practice line', 'Ab', 'Fm7 | Bbm7 | Eb7 | Abmaj7 | Dbmaj7 | Dm7 G7 | Cmaj7 | -',
+      'F4/8 Ab4/8 C5/8 Eb5/8 G5/8 F5/8 Eb5/8 C5/8 | Db5/8 F5/8 Ab5/8 F5/8 Eb5/8 Db5/8 C5/8 Bb4/8 | G4/8 Bb4/8 Db5/8 F5/8 Eb5/8 Db5/8 Bn4/8 Db5/8 | C5/8 Eb5/8 G5/8 Bb5/8 Ab5/8 G5/8 Eb5/8 C5/8 | F5/8 Ab5/8 C6/8 Ab5/8 F5/8 Eb5/8 Db5/8 C5/8 | Dn5/8 F5/8 An5/8 C6/8 Bn5/8 G5/8 F5/8 Dn5/8 | En5/8 G5/8 Bn5/8 G5/8 En5/8 Dn5/8 C5/8 Bn4/8 | C5/h',
+      'An original line through the first 8 bars: chord-tone arpeggios with chromatic approach notes.'),
+  ];
+}
+
+/** Third step: add the original practice lines once per device. */
+export function seedOriginals(state) {
+  const KEY = 'jazzlicks.seed.originals';
+  try {
+    if (localStorage.getItem(KEY)) return false;
+    localStorage.setItem(KEY, String(Date.now()));
+  } catch (e) {
+    return false;
+  }
+  const have = new Set(state.phrases.map((p) => p.id));
+  let changed = false;
+  for (const p of originals()) {
+    if (have.has(p.id) || state.deleted[p.id]) continue;
+    state.phrases.push(p);
+    changed = true;
+  }
+  return changed;
+}
+
 /** Second step: put the example notes into entries made before they existed,
  *  if those entries are still empty. */
 export function seedCatsNotes(state) {

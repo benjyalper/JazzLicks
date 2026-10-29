@@ -7,7 +7,7 @@ import { renderPhrase, hitTest, ghostAt, noteElement, diatonicUnder, pointAt } f
 import { player, previewNote, warmUp } from './player.js';
 import { STYLES } from './backing.js';
 import { initSync, notifyChange, connect, disconnect, syncNow, syncInfo } from './sync.js';
-import { seedCats, seedCatsNotes } from './seed.js';
+import { seedCats, seedCatsNotes, seedOriginals } from './seed.js';
 
 const STORAGE_KEY = 'jazzlicks.v1';
 const MAX_MEASURES = 8;
@@ -2404,7 +2404,7 @@ document.addEventListener('keydown', (e) => {
 function boot() {
   backupOnce();
   load();
-  if (seedCats(state) | seedCatsNotes(state)) save();
+  if (seedCats(state) | seedCatsNotes(state) | seedOriginals(state)) save();
   $('#new-lick').addEventListener('click', () => addPhrase());
   $('#group-view').addEventListener('change', (e) => setGroupView(e.target.value));
   const search = $('#search');
