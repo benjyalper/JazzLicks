@@ -664,8 +664,8 @@ function hintText() {
   const touch = matchMedia('(pointer: coarse)').matches;
   if (state.mode === 'select') {
     return touch
-      ? 'Select mode: press and hold on the staff, then slide across the notes or bars you want. Tap a note or an empty bar to pick just that. A menu with Copy and Paste opens when you let go.'
-      : 'Select mode: drag across the staff (or hold the mouse down and drag) over the notes or bars you want. Click a note or an empty bar to pick just that. A menu with Copy and Paste opens when you let go.';
+      ? 'Select mode: tap the first note, then the last note, to select the notes between (or press and hold, then slide). Tap an empty bar to pick the whole bar. A menu with Copy and Paste opens each time.'
+      : 'Select mode: click the first note, then the last note, to select the notes between (or drag across them). Click an empty bar to pick the whole bar. A menu with Copy and Paste opens each time.';
   }
   return touch
     ? 'Tap the staff to add a note (tap an empty spot to put it on that beat), tap a note to select it, drag a selected note up/down to change its pitch, tap above the staff for a chord.'
@@ -908,7 +908,7 @@ function attachStaveEvents(p, host) {
       const anchor = pointAt(ref.layout, pt.x, pt.y);
       if (!anchor) return;
       if (e.pointerType === 'mouse') e.preventDefault();
-      const g = { id: e.pointerId, select: true, mouse: e.pointerType === 'mouse', x0: e.clientX, y0: e.clientY, t0: Date.now(), hit, anchor, last: anchor, area: false };
+      const g = { id: e.pointerId, select: true, mouse: e.pointerType === 'mouse', shift: e.shiftKey, x0: e.clientX, y0: e.clientY, t0: Date.now(), hit, anchor, last: anchor, area: false };
       // Holding still for a moment starts a selection (needed on touch screens,
       // where a plain slide scrolls the page).
       g.timer = setTimeout(() => { if (gesture === g && !g.cancelled) startArea(p, g); }, 350);
@@ -999,7 +999,7 @@ function finishSelect(p, g, e) {
   if (document.activeElement && document.activeElement !== document.body) document.activeElement.blur();
   const dragged = g.area && (g.last.m !== g.anchor.m || Math.abs(g.last.x - g.anchor.x) > 8);
   if (dragged) selectBetween(p, ref.layout, g.anchor, g.last);
-  else selectAt(p, g.hit, g.anchor);
+  else selectAt(p, g.hit, g.anchor, g.shift);
   changed(p, false);
   openSelMenuNear(p, e.clientX);
 }
@@ -1686,9 +1686,23 @@ function selectBetween(p, layout, a, b) {
   setArea(p, s.m, t.m, inside.map((nt) => ({ m: nt.m, i: nt.i })));
 }
 
-// A tap: a note on its own, or else the whole bar.
-function selectAt(p, hit, at) {
-  if (hit && hit.type === 'note') return setArea(p, hit.m, hit.m, [{ m: hit.m, i: hit.i }]);
+// A tap: a note on its own, or else the whole bar. With one note already
+// selected, tapping another note selects everything from the first to it
+// (so: tap the first note, then the last). Shift+click extends any selection.
+function selectAt(p, hit, at, shift = false) {
+  if (hit && hit.type === 'note') {
+    const one = state.area && state.sel && !state.selEnd;
+    if ((one || (shift && state.sel)) && !(state.sel.m === hit.m && state.sel.i === hit.i)) {
+      const list = flatIndex(p);
+      const a = list.findIndex((x) => x.m === state.sel.m && x.i === state.sel.i);
+      const b = list.findIndex((x) => x.m === hit.m && x.i === hit.i);
+      if (a >= 0 && b >= 0) {
+        const range = list.slice(Math.min(a, b), Math.max(a, b) + 1);
+        return setArea(p, range[0].m, range[range.length - 1].m, range);
+      }
+    }
+    return setArea(p, hit.m, hit.m, [{ m: hit.m, i: hit.i }]);
+  }
   selectBars(p, hit ? hit.m : at.m, hit ? hit.m : at.m);
 }
 
@@ -1763,6 +1777,7 @@ function closeSelMenu() {
   if (selMenu) {
     selMenu.el.remove();
     selMenu = null;
+    document.body.style.paddingBottom = '';
   }
 }
 
@@ -1797,6 +1812,7 @@ function openSelMenu(p, cx, box) {
 
   const hasChords = p.measures.slice(a.m0, a.m1 + 1).some((ms) => (ms.chords || []).some(Boolean));
   const title = n ? `${plural(n, 'note')} · ${where}` : `${where[0].toUpperCase()}${where.slice(1)} (no notes)`;
+  const tip = n === 1 ? h('p', { class: 'sm-tip' }, 'Tip: tap another note to select everything from here to there.') : null;
 
   // Copy: when only part of a bar is chosen, offer the whole bar too.
   const withChords = hasChords ? ' with chords' : '';
@@ -1846,13 +1862,29 @@ function openSelMenu(p, cx, box) {
     h('div', { class: 'sm-head' },
       h('span', {}, title),
       h('button', { class: 'sm-close', 'aria-label': 'Close', onclick: closeSelMenu }, '✕')),
-    copy, paste, change,
+    tip, copy, paste, change,
     more.querySelector('button') ? more : null);
   document.body.appendChild(el);
   // Next to the pointer, kept on screen (and above the phone toolbar).
   const r = el.getBoundingClientRect();
   const bar = document.body.classList.contains('is-editing') && $('.toolbar') ? $('.toolbar').getBoundingClientRect() : null;
   const bottomLimit = bar && bar.top > window.innerHeight / 2 ? bar.top - 8 : window.innerHeight - 8;
+  // Phones: a panel docked just above the toolbar, with the music scrolled up
+  // so the selected notes (and the notes around them) stay visible and tappable.
+  if (window.innerWidth <= 600) {
+    el.classList.add('sheet');
+    el.style.bottom = `${window.innerHeight - bottomLimit}px`;
+    const sheetTop = el.getBoundingClientRect().top;
+    const ref = cards.get(p.id);
+    const staff = ref ? ref.host.getBoundingClientRect() : box;
+    const below = Math.max(box.bottom, Math.min(staff.bottom, box.bottom + 40)) + 8 - sheetTop;
+    if (below > 0) {
+      document.body.style.paddingBottom = `${Math.ceil(window.innerHeight)}px`; // room to scroll
+      window.scrollBy({ top: Math.min(below, Math.max(0, box.top - 70)) });
+    }
+    selMenu = { el, id: p.id };
+    return;
+  }
   const left = Math.min(Math.max(8, cx - r.width / 2), window.innerWidth - r.width - 8);
   let top = box.bottom + 6;
   if (top + r.height > bottomLimit) {

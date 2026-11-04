@@ -22,7 +22,7 @@ Write short jazz phrases (1–8 bars) on a treble staff, add chord symbols, and 
 
 While editing, switch the toolbar from **✎ Write** to **⬚ Select**. In Select mode the staff never adds notes:
 
-- **Drag** across the staff (computer), or **press and hold, then slide** (phone), over the notes or bars you want. **Tap** a note to pick just that note, or tap an empty bar to pick the whole bar.
+- **Tap the first note, then the last note** to select the notes between them (any number, even across bars). Or **drag** across the staff (computer) / **press and hold, then slide** (phone). Tap an empty bar to pick the whole bar.
 - When you let go, a menu opens next to the selection:
   - **Copy**: copy just the selected notes, or the whole bar(s) with their chords.
   - **Paste**: put copied bars into, before or after the selected bar, or put copied notes in place of, before or after the selection.
