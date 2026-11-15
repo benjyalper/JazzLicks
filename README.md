@@ -20,7 +20,7 @@ Write short jazz phrases (1–8 bars) on a treble staff, add chord symbols, and 
 
 ## Recording yourself (Minus 1)
 
-Each **Minus 1** track has a **● Rec** button. It asks for the microphone, plays a bar of count-in and then loops the track while recording you; press **■ Stop** when you're done. The take appears under the track: listen to it, balance **Track** and **You**, nudge the **Timing** if you sound early or late, and **Download MP3** (or WAV). The track is recorded straight from the app, so use headphones and the microphone only hears you. Takes aren't stored in the app, so download the ones you want to keep. The MP3 encoder is [lamejs](https://github.com/zhuker/lamejs) (LGPL, in `lib/`).
+Each **Minus 1** track has a **● Rec** button. It asks for the microphone, plays a bar of count-in and then loops the track while recording you; press **■ Stop** when you're done. The take appears under the track: listen to it, balance **Track** and **You**, fine-tune the **Timing**, and **Download MP3** (or WAV). Press **⏱** once per device to calibrate: clap (or play a short note) on 10 clicks, and the app measures the delay between the sound leaving the device and your playing coming back in, then lines every take up by it. The track is recorded straight from the app, so use headphones and the microphone only hears you. Takes aren't stored in the app, so download the ones you want to keep. The MP3 encoder is [lamejs](https://github.com/zhuker/lamejs) (LGPL, in `lib/`).
 
 ## Copying between licks
 

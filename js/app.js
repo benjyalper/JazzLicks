@@ -5,7 +5,7 @@ import {
 } from './music.js';
 import { renderPhrase, hitTest, ghostAt, noteElement, diatonicUnder, pointAt } from './render.js';
 import { player, previewNote, warmUp, unlockAudio, setAudioSessionType } from './player.js';
-import { openMic, startCapture, mixTake, encodeWav, encodeMp3 } from './recorder.js';
+import { openMic, startCapture, mixTake, encodeWav, encodeMp3, calibrate, storedLatencyMs } from './recorder.js';
 import { STYLES } from './backing.js';
 import { initSync, notifyChange, connect, disconnect, syncNow, syncInfo } from './sync.js';
 import { seedCats, seedCatsNotes, seedOriginals } from './seed.js';
@@ -643,9 +643,10 @@ function buildCard(p) {
   // Minus 1 tracks: record yourself playing along.
   const canRecord = categoryOf(p) === 'minus1';
   const recBtn = canRecord ? h('button', { class: 'rec-btn', title: 'Record yourself playing along', onclick: () => toggleRecord(p.id) }, '● Rec') : null;
+  const calBtn = canRecord ? h('button', { class: 'cal-btn', title: 'Calibrate: measure this device\'s microphone delay so your playing lines up with the track', 'aria-label': 'Calibrate recording timing', onclick: () => runCalibration(p.id) }, '⏱') : null;
   const takeHost = canRecord ? h('div', { class: 'take-host' }) : null;
   const card = h('article', { class: 'lick' + (isEditing ? ' is-editing' : ''), 'data-id': p.id },
-    h('header', { class: 'lick-head' }, playBtn, title, passBadge, recBtn, editBtn, menu),
+    h('header', { class: 'lick-head' }, playBtn, title, passBadge, recBtn, calBtn, editBtn, menu),
     settings,
     isEditing ? buildToolbar(p) : null,
     host,
@@ -2269,7 +2270,35 @@ async function toggleRecord(id) {
   player.play({ ...p, loop: true, countIn: true }, recHooks);
   rec.timer = setInterval(() => updateRecUI(id), 200);
   updateRecUI(id);
-  toast('Recording… press ■ Stop when you\'re done. Headphones keep the track out of the mic.');
+  toast(storedLatencyMs() === null
+    ? 'Recording… Tip: press ⏱ once to measure your device\'s delay so takes line up exactly.'
+    : 'Recording… press ■ Stop when you\'re done. Headphones keep the track out of the mic.');
+}
+
+let calibrating = false;
+
+async function runCalibration(id) {
+  if (rec || calibrating) return;
+  if (!confirm('Calibrate the recording timing\n\nYou\'ll hear 10 clicks. Clap, or play a short note on your instrument, exactly on each click (from the 3rd one on).\n\nWith no headphones you can also just stay quiet: the mic will hear the clicks from the speakers.')) return;
+  if (player.state !== 'stopped') player.stop();
+  unlockAudio();
+  setAudioSessionType('play-and-record');
+  calibrating = true;
+  try {
+    const ms = await calibrate((k, n) => toast(`Click ${k} of ${n}${k < 3 ? ' – get ready' : ' – clap on the click'}`));
+    if (ms === null) {
+      toast('Couldn\'t hear clear claps on the clicks. Try again a little louder, closer to the mic.');
+    } else {
+      toast(`Measured delay: ${ms} ms. Your takes on this device are now lined up by that much.`);
+      // Apply to the take on screen too.
+      const t = takes.get(id);
+      if (t) { t.take.latency = ms / 1000; t.take.calibrated = true; t.offsetMs = 0; renderTake(id); }
+    }
+  } catch (e) {
+    toast(e.message || 'Calibration failed.');
+  }
+  calibrating = false;
+  setAudioSessionType('playback');
 }
 
 function stopRecording() {
@@ -2369,7 +2398,10 @@ function renderTake(id) {
     h('div', { class: 'take-ctls' },
       slider('Track', 'trackGain', 0, 2, 0.05, pct, 'Volume of the Minus 1 track'),
       slider('You', 'micGain', 0, 4, 0.05, pct, 'Volume of your playing'),
-      slider('Timing', 'offsetMs', -150, 150, 5, (v) => `${v > 0 ? '+' : ''}${v} ms`, 'If you sound late against the track, move this right; early, move it left')),
+      slider('Timing', 'offsetMs', -300, 300, 5, (v) => `${v > 0 ? '+' : ''}${v} ms`, 'Fine-tune: if you sound late against the track, move this right; early, move it left')),
+    h('div', { class: 'take-sync' },
+      h('span', { class: 'muted' }, `Delay correction: ${Math.round(t.take.latency * 1000)} ms (${t.take.calibrated ? 'measured on this device' : 'estimated – calibrate for accuracy'})`),
+      h('button', { class: 'btn', onclick: () => runCalibration(id) }, '⏱ Calibrate')),
     h('div', { class: 'take-actions' },
       mp3Btn,
       h('button', { class: 'btn', onclick: () => download(encodeWav(mixTake(t.take, t)), takeName(id, 'wav')) }, 'WAV')),

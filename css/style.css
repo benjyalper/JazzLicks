@@ -586,3 +586,6 @@ button:disabled { cursor: default; opacity: 0.35; }
   .take-ctl { width: 100%; }
   .take-ctl input { flex: 1; width: auto; }
 }
+.cal-btn { border: 1px solid var(--line); background: var(--card); border-radius: 50%; width: 34px; height: 34px; font-size: 16px; cursor: pointer; color: var(--ink-soft); }
+.cal-btn:hover { border-color: var(--ink-soft); color: var(--ink); }
+.take-sync { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }

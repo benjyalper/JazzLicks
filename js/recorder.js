@@ -78,8 +78,12 @@ export async function startCapture(stream) {
 
   const track = stream.getAudioTracks()[0];
   const settings = (track && track.getSettings && track.getSettings()) || {};
-  // How late the microphone hears the track: output + input latency (estimated).
-  const latency = (raw.baseLatency || 0) + (raw.outputLatency || 0) + (settings.latency || 0.01);
+  // How late the microphone hears the track (output + input delay): measured
+  // with calibrate() on this device, or else a rough estimate.
+  const measured = storedLatencyMs();
+  const latency = measured !== null
+    ? measured / 1000
+    : (raw.baseLatency || 0) + (raw.outputLatency || 0) + (settings.latency || 0.01);
 
   return {
     start() { node.port.postMessage('start'); },
@@ -92,7 +96,7 @@ export async function startCapture(stream) {
       silent.disconnect();
       stream.getTracks().forEach((t) => t.stop());
       const len = chunks.reduce((n, c) => n + c[0].length, 0);
-      const take = { sampleRate: raw.sampleRate, latency, backL: new Float32Array(len), backR: new Float32Array(len), mic: new Float32Array(len) };
+      const take = { sampleRate: raw.sampleRate, latency, calibrated: measured !== null, backL: new Float32Array(len), backR: new Float32Array(len), mic: new Float32Array(len) };
       let o = 0;
       for (const [l, r, m] of chunks) {
         take.backL.set(l, o);
@@ -103,6 +107,96 @@ export async function startCapture(stream) {
       return take;
     },
   };
+}
+
+// ---------------------------------------------------------------- calibration
+
+const LATENCY_KEY = 'jazzlicks.micLatencyMs';
+
+export function storedLatencyMs() {
+  try {
+    const v = localStorage.getItem(LATENCY_KEY);
+    return v === null ? null : Number(v);
+  } catch (e) {
+    return null;
+  }
+}
+
+function storeLatencyMs(ms) {
+  try { localStorage.setItem(LATENCY_KEY, String(Math.round(ms))); } catch (e) { /* ignore */ }
+}
+
+const CAL_CLICKS = 10; // the first 2 are just to get into the pulse
+const CAL_GAP = 0.6; // seconds between clicks (100 bpm)
+
+/**
+ * Find how late the microphone is against the track in a take that contains
+ * clicks on the track and claps (or the clicks themselves, heard through the
+ * speakers) on the microphone. Returns milliseconds, or null if unclear.
+ */
+export function measureOffset(take) {
+  const sr = take.sampleRate;
+  const hop = Math.round(sr * 0.001);
+  const env = (x) => {
+    const out = new Float32Array(Math.floor(x.length / hop));
+    for (let k = 0; k < out.length; k++) {
+      let m = 0;
+      for (let i = k * hop; i < (k + 1) * hop; i++) m = Math.max(m, Math.abs(x[i]));
+      out[k] = m;
+    }
+    return out;
+  };
+  const back = env(take.backL);
+  const mic = env(take.mic);
+  // Click positions on the track: rising edges after silence.
+  const clicks = [];
+  for (let k = 1; k < back.length; k++) {
+    if (back[k] > 0.05 && back[k - 1] <= 0.05 && (!clicks.length || k - clicks[clicks.length - 1] > 300)) clicks.push(k);
+  }
+  if (clicks.length < 5) return null;
+  // Microphone noise floor and level.
+  const sorted = Float32Array.from(mic).sort();
+  const floor = sorted[Math.floor(sorted.length * 0.2)];
+  const loud = sorted[Math.floor(sorted.length * 0.995)];
+  const thr = Math.max(floor * 6, floor + (loud - floor) * 0.25, 0.004);
+  const offsets = [];
+  for (const c of clicks.slice(2)) {
+    // A clap can come a little early; the delay is at most ~0.45 s.
+    for (let k = Math.max(1, c - 120); k < Math.min(mic.length, c + 450); k++) {
+      if (mic[k] > thr && mic[k - 1] <= thr) { offsets.push(k - c); break; }
+    }
+  }
+  if (offsets.length < 4) return null;
+  offsets.sort((a, b) => a - b);
+  const mid = offsets[Math.floor(offsets.length / 2)];
+  const close = offsets.filter((o) => Math.abs(o - mid) <= 40);
+  if (close.length < Math.max(4, offsets.length * 0.6)) return null; // too uneven to trust
+  return close.reduce((a, b) => a + b, 0) / close.length;
+}
+
+/** Play clicks, record the microphone, and store the measured delay. */
+export async function calibrate(onStep) {
+  const capture = await startCapture(await openMic());
+  const click = new Tone.Synth({
+    oscillator: { type: 'square' },
+    envelope: { attack: 0.001, decay: 0.04, sustain: 0, release: 0.01 },
+    volume: -6,
+  }).toDestination();
+  capture.start();
+  const t0 = Tone.now() + 0.4;
+  for (let k = 0; k < CAL_CLICKS; k++) click.triggerAttackRelease('C6', 0.03, t0 + k * CAL_GAP);
+  for (let k = 0; k < CAL_CLICKS; k++) {
+    const wait = (t0 + k * CAL_GAP - Tone.now()) * 1000;
+    await new Promise((r) => setTimeout(r, Math.max(0, wait)));
+    if (onStep) onStep(k + 1, CAL_CLICKS);
+  }
+  await new Promise((r) => setTimeout(r, 700));
+  const take = capture.stop();
+  click.dispose();
+  const ms = measureOffset(take);
+  if (ms === null) return null;
+  storeLatencyMs(ms);
+  return Math.round(ms);
 }
 
 /**
