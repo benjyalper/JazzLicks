@@ -134,6 +134,15 @@ function loadKit() {
 // moves it to the "playback" category, so sound comes out like a music app.
 
 let silentEl = null;
+let sessionType = 'playback';
+
+/** 'play-and-record' while recording from the microphone, 'playback' otherwise. */
+export function setAudioSessionType(type) {
+  sessionType = type;
+  try {
+    if (navigator.audioSession) navigator.audioSession.type = type;
+  } catch (e) { /* not supported */ }
+}
 
 function silentWavUrl() {
   const rate = 8000;
@@ -154,7 +163,7 @@ function silentWavUrl() {
 // Must be called directly inside a tap/click handler.
 export function unlockAudio() {
   try {
-    if (navigator.audioSession) navigator.audioSession.type = 'playback';
+    if (navigator.audioSession) navigator.audioSession.type = sessionType;
   } catch (e) { /* not supported */ }
   try {
     if (!silentEl) {

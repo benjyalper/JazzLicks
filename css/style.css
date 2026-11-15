@@ -557,3 +557,32 @@ button:disabled { cursor: default; opacity: 0.35; }
 .sel-menu.sheet { left: 8px; right: 8px; top: auto; width: auto; max-height: 42vh; padding: 6px 10px 8px; }
 .sel-menu.sheet .sm-section { padding-top: 6px; }
 .sel-menu.sheet .sm-btn { padding: 6px 9px; }
+
+/* Minus 1 recording */
+.rec-btn {
+  --lvl: 0;
+  border: 1px solid var(--line); background: var(--card); color: #b42318;
+  border-radius: 999px; padding: 6px 12px; font: inherit; font-weight: 600; cursor: pointer; white-space: nowrap;
+}
+.rec-btn:hover { border-color: #b42318; }
+.rec-btn.on {
+  background: #b42318; border-color: #b42318; color: #fff;
+  box-shadow: 0 0 0 calc(2px + var(--lvl) * 8px) rgba(180, 35, 24, calc(0.15 + var(--lvl) * 0.35));
+}
+.take { margin-top: 10px; border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; background: var(--paper); display: grid; gap: 8px; }
+.take-head { display: flex; align-items: center; gap: 10px; }
+.take-head .muted { font-size: 13px; }
+.take-x { margin-left: auto; border: none; background: none; width: 30px; height: 30px; border-radius: 50%; cursor: pointer; color: var(--ink-soft); }
+.take-x:hover { background: var(--card); }
+.take audio { width: 100%; }
+.take-ctls { display: flex; flex-wrap: wrap; gap: 6px 18px; }
+.take-ctl { display: flex; align-items: center; gap: 8px; font-size: 13.5px; }
+.take-lbl { width: 46px; color: var(--ink-soft); }
+.take-ctl input { width: 130px; accent-color: var(--ink); }
+.take-val { width: 58px; font-variant-numeric: tabular-nums; }
+.take-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.take-note { margin: 0; font-size: 12.5px; }
+@media (max-width: 600px) {
+  .take-ctl { width: 100%; }
+  .take-ctl input { flex: 1; width: auto; }
+}

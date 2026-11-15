@@ -4,7 +4,8 @@ import {
   noteTicks, measureTicks, midi, prettyRoot, pitchLabel, STEPS, spellMidi,
 } from './music.js';
 import { renderPhrase, hitTest, ghostAt, noteElement, diatonicUnder, pointAt } from './render.js';
-import { player, previewNote, warmUp } from './player.js';
+import { player, previewNote, warmUp, unlockAudio, setAudioSessionType } from './player.js';
+import { openMic, startCapture, mixTake, encodeWav, encodeMp3 } from './recorder.js';
 import { STYLES } from './backing.js';
 import { initSync, notifyChange, connect, disconnect, syncNow, syncInfo } from './sync.js';
 import { seedCats, seedCatsNotes, seedOriginals } from './seed.js';
@@ -639,19 +640,25 @@ function buildCard(p) {
   // Close the ⋯ menu after choosing an item.
   menu.addEventListener('click', (e) => { if (e.target.closest('.menu-items button')) menu.removeAttribute('open'); });
   const passBadge = h('span', { class: 'pass-badge', hidden: true });
+  // Minus 1 tracks: record yourself playing along.
+  const canRecord = categoryOf(p) === 'minus1';
+  const recBtn = canRecord ? h('button', { class: 'rec-btn', title: 'Record yourself playing along', onclick: () => toggleRecord(p.id) }, '● Rec') : null;
+  const takeHost = canRecord ? h('div', { class: 'take-host' }) : null;
   const card = h('article', { class: 'lick' + (isEditing ? ' is-editing' : ''), 'data-id': p.id },
-    h('header', { class: 'lick-head' }, playBtn, title, passBadge, editBtn, menu),
+    h('header', { class: 'lick-head' }, playBtn, title, passBadge, recBtn, editBtn, menu),
     settings,
     isEditing ? buildToolbar(p) : null,
     host,
     isEditing ? h('p', { class: 'hint' }, hintText()) : null,
+    takeHost,
     notes);
 
   if (isEditing) attachStaveEvents(p, host);
   else host.addEventListener('dblclick', () => setEditing(p.id));
 
-  Object.assign(ref, { el: card, host, playBtn, passBadge, layout: null, override: null });
+  Object.assign(ref, { el: card, host, playBtn, passBadge, recBtn, takeHost, layout: null, override: null });
   cards.set(p.id, ref);
+  if (canRecord) queueMicrotask(() => { updateRecUI(p.id); if (takes.has(p.id)) renderTake(p.id); });
   return card;
 }
 
@@ -2216,6 +2223,157 @@ function restartIfPlaying(id) {
   if (!p || player.currentId !== id) return;
   if (player.state === 'playing') player.play(p, hooksFor(id));
   else player.stop(); // paused: the next play starts fresh with the new settings
+}
+
+// ---------------------------------------------------------------- recording (Minus 1)
+
+let rec = null; // { id, capture, started, t0, timer }
+const takes = new Map(); // id -> { take, n, trackGain, micGain, offsetMs, url }
+
+async function toggleRecord(id) {
+  if (rec) return stopRecording();
+  const p = byId(id);
+  if (!p) return;
+  if (!p.measures.some((m) => m.chords.some(Boolean))) return toast('Add some chords first.');
+  unlockAudio(); // inside the tap, before waiting for the microphone
+  setAudioSessionType('play-and-record');
+  const ref = cards.get(id);
+  if (ref && ref.recBtn) ref.recBtn.textContent = 'Mic…';
+  let capture;
+  try {
+    capture = await startCapture(await openMic());
+  } catch (e) {
+    setAudioSessionType('playback');
+    updateRecUI(id);
+    return toast(e.message || 'Could not start recording.');
+  }
+  rec = { id, capture, started: false, t0: 0, timer: null };
+  const hooks = hooksFor(id);
+  const recHooks = {
+    ...hooks,
+    onState: (st) => {
+      hooks.onState(st);
+      if (!rec || rec.id !== id) return;
+      if (st === 'playing' && !rec.started) {
+        rec.started = true;
+        rec.t0 = Date.now();
+        capture.start();
+      } else if (st === 'paused') {
+        player.stop(); // pausing ends the take
+      } else if (st === 'stopped') {
+        finishRecording();
+      }
+    },
+  };
+  // The track loops (with a bar of count-in) until you press Stop.
+  player.play({ ...p, loop: true, countIn: true }, recHooks);
+  rec.timer = setInterval(() => updateRecUI(id), 200);
+  updateRecUI(id);
+  toast('Recording… press ■ Stop when you\'re done. Headphones keep the track out of the mic.');
+}
+
+function stopRecording() {
+  if (!rec) return;
+  if (player.currentId === rec.id) player.stop(); // → finishRecording via the 'stopped' state
+  else finishRecording();
+}
+
+function finishRecording() {
+  const r = rec;
+  rec = null;
+  if (!r) return;
+  clearInterval(r.timer);
+  const take = r.capture.stop();
+  setAudioSessionType('playback');
+  if (player.currentId === r.id) player.stop();
+  updateRecUI(r.id);
+  if (!r.started || take.mic.length < take.sampleRate) return toast('That take was too short to keep.');
+  const prev = takes.get(r.id);
+  if (prev && prev.url) URL.revokeObjectURL(prev.url);
+  takes.set(r.id, {
+    take, n: prev ? prev.n + 1 : 1,
+    trackGain: prev ? prev.trackGain : 1, micGain: prev ? prev.micGain : 1, offsetMs: prev ? prev.offsetMs : 0,
+  });
+  renderTake(r.id);
+}
+
+const clock = (sec) => `${Math.floor(sec / 60)}:${String(Math.floor(sec % 60)).padStart(2, '0')}`;
+
+function updateRecUI(id) {
+  const ref = cards.get(id);
+  if (!ref || !ref.recBtn) return;
+  const on = rec && rec.id === id;
+  ref.recBtn.classList.toggle('on', !!on);
+  if (!on) {
+    ref.recBtn.textContent = '● Rec';
+    ref.recBtn.style.removeProperty('--lvl');
+    return;
+  }
+  ref.recBtn.textContent = rec.started ? `■ Stop ${clock((Date.now() - rec.t0) / 1000)}` : '■ Stop';
+  // The button's glow follows the microphone level.
+  ref.recBtn.style.setProperty('--lvl', Math.min(1, rec.capture.level() * 3).toFixed(2));
+}
+
+function takeName(id, ext) {
+  const p = byId(id);
+  const t = takes.get(id);
+  const base = ((p && p.title) || 'Take').replace(/[\\/:*?"<>|]+/g, '-').trim();
+  return `${base} - take ${t ? t.n : 1}.${ext}`;
+}
+
+function download(blob, name) {
+  const a = h('a', { href: URL.createObjectURL(blob), download: name });
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 4000);
+}
+
+function renderTake(id) {
+  const t = takes.get(id);
+  const ref = cards.get(id);
+  if (!ref || !ref.takeHost) return;
+  if (!t) return ref.takeHost.replaceChildren();
+  if (t.url) URL.revokeObjectURL(t.url);
+  t.url = URL.createObjectURL(encodeWav(mixTake(t.take, t)));
+  const seconds = t.take.mic.length / t.take.sampleRate;
+  const slider = (label, key, min, max, step, fmt, title) => {
+    const out = h('span', { class: 'take-val' }, fmt(t[key]));
+    const input = h('input', { type: 'range', min, max, step, value: t[key], 'aria-label': label });
+    input.addEventListener('input', () => { t[key] = Number(input.value); out.textContent = fmt(t[key]); });
+    input.addEventListener('change', () => renderTake(id)); // re-mix when let go
+    return h('label', { class: 'take-ctl', title }, h('span', { class: 'take-lbl' }, label), input, out);
+  };
+  const pct = (v) => `${Math.round(v * 100)}%`;
+  const mp3Btn = h('button', { class: 'btn primary' }, '⬇ Download MP3');
+  mp3Btn.addEventListener('click', async () => {
+    mp3Btn.disabled = true;
+    try {
+      const blob = await encodeMp3(mixTake(t.take, t), (f) => { mp3Btn.textContent = `Making MP3… ${Math.round(f * 100)}%`; });
+      download(blob, takeName(id, 'mp3'));
+    } catch (e) {
+      toast(e.message || 'Could not make the MP3.');
+    }
+    mp3Btn.disabled = false;
+    mp3Btn.textContent = '⬇ Download MP3';
+  });
+  ref.takeHost.replaceChildren(h('div', { class: 'take' },
+    h('div', { class: 'take-head' },
+      h('strong', {}, `Your take ${t.n}`), h('span', { class: 'muted' }, clock(seconds)),
+      h('button', { class: 'take-x', title: 'Discard this take', 'aria-label': 'Discard this take', onclick: () => {
+        if (!confirm('Discard this take?')) return;
+        URL.revokeObjectURL(t.url);
+        takes.delete(id);
+        renderTake(id);
+      } }, '✕')),
+    h('audio', { controls: true, src: t.url, preload: 'auto' }),
+    h('div', { class: 'take-ctls' },
+      slider('Track', 'trackGain', 0, 2, 0.05, pct, 'Volume of the Minus 1 track'),
+      slider('You', 'micGain', 0, 4, 0.05, pct, 'Volume of your playing'),
+      slider('Timing', 'offsetMs', -150, 150, 5, (v) => `${v > 0 ? '+' : ''}${v} ms`, 'If you sound late against the track, move this right; early, move it left')),
+    h('div', { class: 'take-actions' },
+      mp3Btn,
+      h('button', { class: 'btn', onclick: () => download(encodeWav(mixTake(t.take, t)), takeName(id, 'wav')) }, 'WAV')),
+    h('p', { class: 'muted take-note' }, 'Takes aren\'t saved in the app: download the MP3 to keep it. Recording again replaces this take.')));
 }
 
 // ---------------------------------------------------------------- keyboard

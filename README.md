@@ -18,6 +18,10 @@ Write short jazz phrases (1–8 bars) on a treble staff, add chord symbols, and 
 - A text box under each lick for your notes
 - Licks are saved in the browser, and **Sync** keeps them the same on all your devices (via a private GitHub gist). Export / Import makes backup files
 
+## Recording yourself (Minus 1)
+
+Each **Minus 1** track has a **● Rec** button. It asks for the microphone, plays a bar of count-in and then loops the track while recording you; press **■ Stop** when you're done. The take appears under the track: listen to it, balance **Track** and **You**, nudge the **Timing** if you sound early or late, and **Download MP3** (or WAV). The track is recorded straight from the app, so use headphones and the microphone only hears you. Takes aren't stored in the app, so download the ones you want to keep. The MP3 encoder is [lamejs](https://github.com/zhuker/lamejs) (LGPL, in `lib/`).
+
 ## Copying between licks
 
 While editing, switch the toolbar from **✎ Write** to **⬚ Select**. In Select mode the staff never adds notes:
