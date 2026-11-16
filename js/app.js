@@ -2608,10 +2608,34 @@ function refreshSyncDialog() {
     onclick: () => navigator.share({ title: 'JazzLicks sync link', url: info.link }).catch(() => {}),
   }, 'Share…') : null;
 
+  // The key was refused (expired or deleted): let a new one be pasted right here.
+  let renew = null;
+  if (info.status === 'error' && /key/i.test(info.detail || '')) {
+    const input = h('input', { type: 'password', class: 'token-input', placeholder: 'Paste your new key', autocomplete: 'off', spellcheck: 'false' });
+    const btn = h('button', {
+      class: 'btn primary',
+      onclick: async () => {
+        btn.disabled = true;
+        btn.textContent = 'Connecting…';
+        try {
+          await connect(input.value);
+          toast('New key saved. Sync is working again. Send your devices and friend the new link (Copy link).');
+        } catch (e) { /* message shown via status */ }
+        input.blur();
+        refreshSyncDialog();
+      },
+    }, 'Use this key');
+    renew = h('div', { class: 'renew' },
+      h('p', {}, h('a', { href: 'https://github.com/settings/tokens/new?scopes=gist&description=JazzLicks%20sync', target: '_blank', rel: 'noopener' }, 'Create a new GitHub key'),
+        ' (gist is already ticked; set Expiration to “No expiration”), then paste it here. Your licks stay as they are.'),
+      h('div', { class: 'token-row' }, input, btn));
+  }
+
   appendAll(box, close,
     h('h2', {}, 'Sync is on'),
     h('p', {}, `Connected to GitHub as `, h('b', {}, info.login || '?'), `. Last synced: ${timeAgo(info.lastSync)}.`),
     error,
+    renew,
     h('h3', {}, 'Add another device, or share with a friend'),
     h('p', {}, 'Open this link on your other device, or send it to a friend. Everyone who opens it shares this collection: you all see, add and edit the same licks.'),
     h('div', { class: 'link-row' }, copyBtn, shareBtn),

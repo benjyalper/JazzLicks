@@ -589,3 +589,5 @@ button:disabled { cursor: default; opacity: 0.35; }
 .cal-btn { border: 1px solid var(--line); background: var(--card); border-radius: 50%; width: 34px; height: 34px; font-size: 16px; cursor: pointer; color: var(--ink-soft); }
 .cal-btn:hover { border-color: var(--ink-soft); color: var(--ink); }
 .take-sync { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.renew { border: 1px solid var(--line); border-radius: 10px; padding: 8px 12px 12px; margin: 8px 0 4px; background: var(--paper); }
+.renew p { margin: 4px 0 8px; }
