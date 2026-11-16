@@ -2325,9 +2325,28 @@ async function finishRecording() {
   if (prev && prev.url) URL.revokeObjectURL(prev.url);
   takes.set(r.id, {
     take, n: prev ? prev.n + 1 : 1,
-    trackGain: prev ? prev.trackGain : 1, micGain: prev ? prev.micGain : 1, offsetMs: prev ? prev.offsetMs : 0,
+    trackGain: prev ? prev.trackGain : mixPref('trackGain', 1), micGain: prev ? prev.micGain : mixPref('micGain', 3.8), offsetMs: prev ? prev.offsetMs : 0,
   });
   renderTake(r.id);
+}
+
+// Track / You levels: the last ones you set are remembered on this device
+// (your playing starts at 380%: a raw microphone is much quieter than the track).
+const MIX_KEY = 'jazzlicks.takeMix';
+function mixPref(key, fallback) {
+  try {
+    const v = (JSON.parse(localStorage.getItem(MIX_KEY)) || {})[key];
+    return typeof v === 'number' ? v : fallback;
+  } catch (e) {
+    return fallback;
+  }
+}
+function saveMixPref(key, value) {
+  try {
+    const all = JSON.parse(localStorage.getItem(MIX_KEY)) || {};
+    all[key] = value;
+    localStorage.setItem(MIX_KEY, JSON.stringify(all));
+  } catch (e) { /* ignore */ }
 }
 
 const clock = (sec) => `${Math.floor(sec / 60)}:${String(Math.floor(sec % 60)).padStart(2, '0')}`;
@@ -2373,7 +2392,10 @@ function renderTake(id) {
     const out = h('span', { class: 'take-val' }, fmt(t[key]));
     const input = h('input', { type: 'range', min, max, step, value: t[key], 'aria-label': label });
     input.addEventListener('input', () => { t[key] = Number(input.value); out.textContent = fmt(t[key]); });
-    input.addEventListener('change', () => renderTake(id)); // re-mix when let go
+    input.addEventListener('change', () => { // re-mix when let go
+      if (key === 'trackGain' || key === 'micGain') saveMixPref(key, t[key]);
+      renderTake(id);
+    });
     return h('label', { class: 'take-ctl', title }, h('span', { class: 'take-lbl' }, label), input, out);
   };
   const pct = (v) => `${Math.round(v * 100)}%`;
@@ -2401,7 +2423,7 @@ function renderTake(id) {
     h('audio', { controls: true, src: t.url, preload: 'auto' }),
     h('div', { class: 'take-ctls' },
       slider('Track', 'trackGain', 0, 2, 0.05, pct, 'Volume of the Minus 1 track'),
-      slider('You', 'micGain', 0, 4, 0.05, pct, 'Volume of your playing'),
+      slider('You', 'micGain', 0, 6, 0.05, pct, 'Volume of your playing'),
       slider('Timing', 'offsetMs', -300, 300, 5, (v) => `${v > 0 ? '+' : ''}${v} ms`, 'Fine-tune: if you sound late against the track, move this right; early, move it left')),
     h('div', { class: 'take-sync' },
       h('span', { class: 'muted' }, `Delay correction: ${Math.round(t.take.latency * 1000)} ms (${t.take.calibrated ? 'measured on this device' : 'estimated – calibrate for accuracy'})`),
