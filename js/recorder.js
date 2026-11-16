@@ -232,6 +232,16 @@ export async function calibrate(onStep) {
  * Mix a take: track and microphone levels (0–2), and how many milliseconds
  * to pull the microphone earlier to line it up with the track.
  */
+const OUTPUT_GAIN = 1.07;
+const KNEE = 0.9;
+// Unchanged below the knee; above it, eased smoothly towards (never past) 0.98.
+function soften(x) {
+  const a = Math.abs(x);
+  if (a <= KNEE) return x;
+  const y = KNEE + 0.08 * Math.tanh((a - KNEE) / 0.08);
+  return x < 0 ? -y : y;
+}
+
 export function mixTake(take, { trackGain = 1, micGain = 1, offsetMs = 0 } = {}) {
   const n = take.backL.length;
   const shift = Math.round(((take.latency * 1000 + offsetMs) / 1000) * take.sampleRate);
@@ -245,11 +255,13 @@ export function mixTake(take, { trackGain = 1, micGain = 1, offsetMs = 0 } = {})
     R[i] = take.backR[i] * trackGain + m;
     peak = Math.max(peak, Math.abs(L[i]), Math.abs(R[i]));
   }
-  // Never clip: scale the whole mix down if it would.
-  if (peak > 0.98) {
-    const g = 0.98 / peak;
-    for (let i = 0; i < n; i++) { L[i] *= g; R[i] *= g; }
-  }
+  // The finished mix is 7% louder overall. A take that would go over the top
+  // is first brought to 7% above full scale; then only the peaks above 0.9 are
+  // rounded off (a light soft limiter) instead of turning the whole take back
+  // down, so it never clips and the extra 7% is really heard.
+  let g = OUTPUT_GAIN;
+  if (peak * g > 0.98 * OUTPUT_GAIN) g = (0.98 * OUTPUT_GAIN) / peak; // loud takes: also just 7% up
+  for (let i = 0; i < n; i++) { L[i] = soften(L[i] * g); R[i] = soften(R[i] * g); }
   return { L, R, sampleRate: take.sampleRate };
 }
 
