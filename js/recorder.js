@@ -2,22 +2,45 @@
 // app's audio output) and the microphone are captured side by side in the
 // same audio clock, then mixed and exported as WAV or MP3.
 
+// Collects ~90 ms batches in the audio thread and hands them over in one
+// message each, so recording barely loads the page (which also runs the
+// music scheduler).
 const WORKLET = `
+const BATCH = 4096;
 class JLRecorder extends AudioWorkletProcessor {
   constructor() {
     super();
     this.on = false;
-    this.port.onmessage = (e) => { this.on = e.data === 'start'; };
+    this.fresh();
+    this.port.onmessage = (e) => {
+      if (e.data === 'start') this.on = true;
+      else if (e.data === 'stop') { this.flush(); this.on = false; this.port.postMessage('done'); }
+    };
+  }
+  fresh() {
+    this.l = new Float32Array(BATCH); this.r = new Float32Array(BATCH); this.m = new Float32Array(BATCH);
+    this.n = 0; this.peak = 0;
+  }
+  flush() {
+    if (!this.n) return;
+    const l = this.l.slice(0, this.n), r = this.r.slice(0, this.n), m = this.m.slice(0, this.n);
+    this.port.postMessage({ l, r, m, peak: this.peak }, [l.buffer, r.buffer, m.buffer]);
+    this.fresh();
   }
   process(inputs) {
-    if (this.on) {
-      const back = inputs[0] || [];
-      const mic = inputs[1] || [];
-      const n = (back[0] || mic[0] || []).length || 128;
-      const zero = new Float32Array(n);
-      this.port.postMessage([
-        (back[0] || zero).slice(), (back[1] || back[0] || zero).slice(), (mic[0] || zero).slice(),
-      ]);
+    if (!this.on) return true;
+    const back = inputs[0] || [];
+    const mic = inputs[1] || [];
+    const bl = back[0], br = back[1] || back[0], mc = mic[0];
+    const len = (bl || mc || { length: 128 }).length;
+    for (let i = 0; i < len; i++) {
+      if (this.n === BATCH) this.flush();
+      const v = mc ? mc[i] : 0;
+      this.l[this.n] = bl ? bl[i] : 0;
+      this.r[this.n] = br ? br[i] : 0;
+      this.m[this.n] = v;
+      if (v > this.peak) this.peak = v; else if (-v > this.peak) this.peak = -v;
+      this.n++;
     }
     return true;
   }
@@ -70,10 +93,11 @@ export async function startCapture(stream) {
 
   const chunks = [];
   let peak = 0;
+  let done = null;
   node.port.onmessage = (e) => {
+    if (e.data === 'done') { if (done) done(); return; }
     chunks.push(e.data);
-    const mic = e.data[2];
-    for (let i = 0; i < mic.length; i += 8) peak = Math.max(peak, Math.abs(mic[i]));
+    peak = Math.max(peak, e.data.peak);
   };
 
   const track = stream.getAudioTracks()[0];
@@ -88,17 +112,22 @@ export async function startCapture(stream) {
   return {
     start() { node.port.postMessage('start'); },
     level() { const p = peak; peak = 0; return p; },
-    stop() {
-      node.port.postMessage('stop');
+    // Ends the capture and returns the take (waits for the last batch).
+    async stop() {
+      await new Promise((resolve) => {
+        done = resolve;
+        node.port.postMessage('stop');
+        setTimeout(resolve, 500); // in case the audio is already suspended
+      });
       try { Tone.getDestination().disconnect(node); } catch (e) { /* ignore */ }
       micSrc.disconnect();
       node.disconnect();
       silent.disconnect();
       stream.getTracks().forEach((t) => t.stop());
-      const len = chunks.reduce((n, c) => n + c[0].length, 0);
+      const len = chunks.reduce((n, c) => n + c.l.length, 0);
       const take = { sampleRate: raw.sampleRate, latency, calibrated: measured !== null, backL: new Float32Array(len), backR: new Float32Array(len), mic: new Float32Array(len) };
       let o = 0;
-      for (const [l, r, m] of chunks) {
+      for (const { l, r, m } of chunks) {
         take.backL.set(l, o);
         take.backR.set(r, o);
         take.mic.set(m, o);
@@ -191,7 +220,7 @@ export async function calibrate(onStep) {
     if (onStep) onStep(k + 1, CAL_CLICKS);
   }
   await new Promise((r) => setTimeout(r, 700));
-  const take = capture.stop();
+  const take = await capture.stop();
   click.dispose();
   const ms = measureOffset(take);
   if (ms === null) return null;

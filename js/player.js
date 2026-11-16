@@ -417,6 +417,10 @@ class Player {
     const T = Tone.getTransport();
     T.cancel(0);
     T.position = 0;
+    // Run the transport at the track's tempo so bars (and the loop points)
+    // fall on whole ticks; at Tone's default 120 bpm a count-in loop start
+    // fell between ticks and beat 1 was skipped on every repeat.
+    T.bpm.value = phrase.tempo || 160;
     for (const ev of events) {
       T.schedule((time) => {
         // Start slightly early for instruments whose recordings begin late.

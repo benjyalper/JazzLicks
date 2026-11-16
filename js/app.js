@@ -2266,7 +2266,10 @@ async function toggleRecord(id) {
       }
     },
   };
-  // The track loops (with a bar of count-in) until you press Stop.
+  // The track loops (with a bar of count-in) until you press Stop. Notes are
+  // planned further ahead while recording so a busy moment on the page
+  // can't make the track stumble (it still plays exactly on time).
+  Tone.getContext().lookAhead = 0.35;
   player.play({ ...p, loop: true, countIn: true }, recHooks);
   rec.timer = setInterval(() => updateRecUI(id), 200);
   updateRecUI(id);
@@ -2307,12 +2310,13 @@ function stopRecording() {
   else finishRecording();
 }
 
-function finishRecording() {
+async function finishRecording() {
   const r = rec;
   rec = null;
   if (!r) return;
   clearInterval(r.timer);
-  const take = r.capture.stop();
+  Tone.getContext().lookAhead = 0.1;
+  const take = await r.capture.stop();
   setAudioSessionType('playback');
   if (player.currentId === r.id) player.stop();
   updateRecUI(r.id);
